@@ -43,7 +43,11 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+    "Pick List" : "custom_scripts/pick_list.js",
+    "Sales Invoice" : "custom_scripts/sales_invoice.js",
+    "Delivery Note" : "custom_scripts/delivery_note.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -137,34 +141,58 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "Delivery Note": {
+        "before_submit":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.before_submit",
+        "validate":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.validate"
+    },
+    "Sales Invoice":{
+        "on_submit":"bo_eshipz_integration.eshipz_integration.override.sales_invoice.on_submit"
+    }
+}
 
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"bo_eshipz_integration.tasks.all"
-# 	],
-# 	"daily": [
-# 		"bo_eshipz_integration.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"bo_eshipz_integration.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"bo_eshipz_integration.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"bo_eshipz_integration.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+
+    "cron":{
+        # Sales Invoice
+        "0 18 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_details_for_si",
+            "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_detail_status_for_si"
+        ],
+        "45 1 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.scheduler.get_delivered_pdf_and_fetch_pods_for_si"
+        ],
+        "45 2 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_delivery_date_for_si"
+        ],
+
+        #Dispatch Forms
+        "0 7 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_shipping_details_for_dtf",
+            "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_shipping_detail_status_for_dtf"
+        ],
+        "30 3 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.get_delivered_pdf_and_fetch_pods_for_dtf"
+        ],
+        "15 4 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_delivery_date_for_dtf"
+        ],
+
+        #Pickup Forms
+        "0 4 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_shipping_detail_status_for_pf"
+        ],
+        "45 4 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_delivered_pdf_and_fetch_pods_for_pf"
+        ],
+        "30 5 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_delivery_date_for_pf"
+        ]
+    }
+}
 
 # Testing
 # -------
@@ -203,6 +231,15 @@ app_license = "mit"
 # ----------
 # before_job = ["bo_eshipz_integration.utils.before_job"]
 # after_job = ["bo_eshipz_integration.utils.after_job"]
+
+fixtures = [
+    {"dt": "Custom Field", "filters": [
+        [
+            "module", "in", ["Bo Eshipz Integration"]
+        ]
+    ]},
+    
+]
 
 # User Data Protection
 # --------------------

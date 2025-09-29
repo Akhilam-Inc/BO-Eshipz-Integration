@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:vendor_name",
+ "creation": "2025-09-26 18:33:23.100815",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "vendor_name",
+  "vendor_id",
+  "vendor_slug",
+  "column_break_q66k",
+  "is_forward",
+  "is_reverse"
+ ],
+ "fields": [
+  {
+   "fieldname": "vendor_name",
+   "fieldtype": "Data",
+   "label": "Vendor Name",
+   "unique": 1
+  },
+  {
+   "fieldname": "vendor_id",
+   "fieldtype": "Data",
+   "label": "Vendor ID"
+  },
+  {
+   "fieldname": "vendor_slug",
+   "fieldtype": "Data",
+   "label": "Vendor Slug"
+  },
+  {
+   "fieldname": "column_break_q66k",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_forward",
+   "fieldtype": "Check",
+   "label": "Is Forward"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_reverse",
+   "fieldtype": "Check",
+   "label": "Is Reverse"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-09-26 18:37:38.171545",
+ "modified_by": "Administrator",
+ "module": "Bo Eshipz Integration",
+ "name": "Vendor Services",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-08-11 16:33:45.088240",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "box_type",
+  "item",
+  "qty",
+  "weight",
+  "is_return"
+ ],
+ "fields": [
+  {
+   "fieldname": "box_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Box Type",
+   "options": "Bo Box Type"
+  },
+  {
+   "fetch_from": "box_type.item",
+   "fetch_if_empty": 1,
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item"
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Qty"
+  },
+  {
+   "fetch_from": "box_type.weight",
+   "fetch_if_empty": 1,
+   "fieldname": "weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Weight"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_return",
+   "fieldtype": "Check",
+   "label": "Is Return"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-08-11 16:37:57.393652",
+ "modified_by": "Administrator",
+ "module": "Bo Eshipz Integration",
+ "name": "Bo Box Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

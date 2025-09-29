@@ -1,0 +1,219 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "PF-.#####",
+ "creation": "2025-09-25 12:50:04.783670",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "pickup_details_section",
+  "customer",
+  "customer_address",
+  "customer_address_display",
+  "column_break_4irw",
+  "pickup_request_date",
+  "pickup_scheduled_date",
+  "actual_pickup_date",
+  "order_amount",
+  "total_weight",
+  "receiver_and_vendor_information_section",
+  "receiver_name",
+  "receiver_address",
+  "receiver_address_display",
+  "column_break_yzup",
+  "vendor_description",
+  "slug",
+  "vendor_id",
+  "section_break_dmis",
+  "parcels",
+  "amended_from",
+  "eshipz_details_tab",
+  "is_eshipz_order_created",
+  "eshipz_tracking_number",
+  "eshipz_shipment_status",
+  "actual_delivery_date"
+ ],
+ "fields": [
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Pickup Forms",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "pickup_details_section",
+   "fieldtype": "Section Break",
+   "label": "Pickup Details"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "customer_address",
+   "fieldtype": "Link",
+   "label": "Customer Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "customer_address_display",
+   "fieldtype": "Small Text",
+   "label": "Customer Address Display",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_4irw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pickup_request_date",
+   "fieldtype": "Date",
+   "label": "Pickup Request Date"
+  },
+  {
+   "fieldname": "pickup_scheduled_date",
+   "fieldtype": "Date",
+   "label": "Pickup Scheduled Date"
+  },
+  {
+   "fieldname": "actual_pickup_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Actual Pickup Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "receiver_and_vendor_information_section",
+   "fieldtype": "Section Break",
+   "label": "Receiver & Vendor Information"
+  },
+  {
+   "fieldname": "receiver_name",
+   "fieldtype": "Link",
+   "label": "Receiver Name",
+   "options": "Company"
+  },
+  {
+   "fieldname": "receiver_address",
+   "fieldtype": "Link",
+   "label": "Receiver Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "receiver_address_display",
+   "fieldtype": "Small Text",
+   "label": "Receiver Address Display",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_yzup",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "vendor_description",
+   "fieldtype": "Link",
+   "label": "Vendor Description",
+   "options": "Vendor Services",
+   "reqd": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fetch_from": "vendor_description.vendor_slug",
+   "fetch_if_empty": 1,
+   "fieldname": "slug",
+   "fieldtype": "Data",
+   "label": "Slug"
+  },
+  {
+   "allow_on_submit": 1,
+   "fetch_from": "vendor_description.vendor_id",
+   "fetch_if_empty": 1,
+   "fieldname": "vendor_id",
+   "fieldtype": "Data",
+   "label": "Vendor ID"
+  },
+  {
+   "fieldname": "section_break_dmis",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "parcels",
+   "fieldtype": "Table",
+   "label": "parcels",
+   "options": "Bo Box Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "eshipz_details_tab",
+   "fieldtype": "Tab Break",
+   "label": "Eshipz Details"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_eshipz_order_created",
+   "fieldtype": "Check",
+   "label": "Is Eshipz Order Created"
+  },
+  {
+   "fieldname": "eshipz_tracking_number",
+   "fieldtype": "Data",
+   "label": "Eshipz Tracking Number"
+  },
+  {
+   "fieldname": "eshipz_shipment_status",
+   "fieldtype": "Data",
+   "label": "Eshipz Shipment Status"
+  },
+  {
+   "fieldname": "actual_delivery_date",
+   "fieldtype": "Date",
+   "label": "Actual Delivery Date"
+  },
+  {
+   "fieldname": "order_amount",
+   "fieldtype": "Currency",
+   "label": "Order Amount"
+  },
+  {
+   "fieldname": "total_weight",
+   "fieldtype": "Float",
+   "label": "Total Weight"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-09-26 18:46:07.379579",
+ "modified_by": "Administrator",
+ "module": "Bo Eshipz Integration",
+ "name": "Pickup Forms",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,224 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "DT-.#####",
+ "creation": "2025-08-11 16:20:29.386282",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "order_date",
+  "order_type",
+  "pick_list_ref",
+  "sender_name",
+  "sender_address",
+  "customer",
+  "customer_address",
+  "sales_person",
+  "sales_person_address",
+  "column_break_6yxn",
+  "sender_address_display",
+  "customer_address_display",
+  "sales_person_address_display",
+  "is_cod",
+  "cod_amount",
+  "order_amount",
+  "column_break_30n6",
+  "is_eshipz_order_created",
+  "eshipz_tracking_number",
+  "eshipz_shipment_status",
+  "actual_delivery_date",
+  "section_break_kyql",
+  "parcels",
+  "section_break_we47",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_we47",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Dispatch and Transfer Form",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "order_date",
+   "fieldtype": "Date",
+   "label": "Order Date"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_cod",
+   "fieldtype": "Check",
+   "label": "Is COD"
+  },
+  {
+   "depends_on": "is_cod",
+   "fieldname": "cod_amount",
+   "fieldtype": "Currency",
+   "label": "COD Amount",
+   "mandatory_depends_on": "is_cod"
+  },
+  {
+   "fieldname": "section_break_kyql",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "parcels",
+   "fieldtype": "Table",
+   "label": "Parcels",
+   "options": "Bo Box Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_6yxn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_eshipz_order_created",
+   "fieldtype": "Check",
+   "label": "Is Eshipz Order Created",
+   "read_only": 1
+  },
+  {
+   "fieldname": "order_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Order Amount",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_30n6",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "eshipz_tracking_number",
+   "fieldtype": "Data",
+   "label": "Eshipz Tracking Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "eshipz_shipment_status",
+   "fieldtype": "Data",
+   "label": "Eshipz Shipment Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "actual_delivery_date",
+   "fieldtype": "Date",
+   "label": "Actual Delivery Date",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Dispatch\"",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "order_type",
+   "fieldtype": "Select",
+   "label": "Order Type",
+   "options": "\nDispatch\nSamples and Spare Parts"
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Samples and Spare Parts\"",
+   "fieldname": "pick_list_ref",
+   "fieldtype": "Link",
+   "label": "Pick List Ref",
+   "mandatory_depends_on": "eval:doc.order_type == \"Samples and Spare Parts\"",
+   "options": "Pick List"
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Samples and Spare Parts\"",
+   "fieldname": "sales_person",
+   "fieldtype": "Link",
+   "label": "Sales Person",
+   "options": "Sales Person"
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Samples and Spare Parts\"",
+   "fieldname": "sales_person_address",
+   "fieldtype": "Link",
+   "label": "Sales Person Address",
+   "options": "Address"
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Samples and Spare Parts\"",
+   "fieldname": "sales_person_address_display",
+   "fieldtype": "Small Text",
+   "label": "Sales Person Address Display",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sender_address",
+   "fieldtype": "Link",
+   "label": "Sender Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "sender_address_display",
+   "fieldtype": "Small Text",
+   "label": "Sender Address Display",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Dispatch\"",
+   "fieldname": "customer_address",
+   "fieldtype": "Link",
+   "label": "Customer Address",
+   "options": "Address"
+  },
+  {
+   "fieldname": "sender_name",
+   "fieldtype": "Link",
+   "label": "Sender Name",
+   "options": "Company"
+  },
+  {
+   "depends_on": "eval:doc.order_type == \"Dispatch\"",
+   "fieldname": "customer_address_display",
+   "fieldtype": "Small Text",
+   "label": "Customer Address Display",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-09-25 11:52:22.082733",
+ "modified_by": "Administrator",
+ "module": "Bo Eshipz Integration",
+ "name": "Dispatch and Transfer Form",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
