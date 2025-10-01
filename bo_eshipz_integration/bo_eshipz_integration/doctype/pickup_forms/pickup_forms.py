@@ -43,6 +43,9 @@ def create_eshipz_order(doc):
 		receiver = build_address(doc.get("receiver_name"), doc.get("receiver_address"), address_type="business")
 
 		parcels = get_parcels(doc.get("name"),currency)
+		if not parcels:
+			frappe.msgprint("No parcels found for this Pickup Form.")
+			return	
 
 		parsed_date = datetime.strptime(doc.get('actual_pickup_date'), "%Y-%m-%d")
 		now = datetime.now()
@@ -101,6 +104,10 @@ def create_eshipz_order(doc):
 				frappe.msgprint(f"Eshipz order created successfully. AWB: {resp_json['data']['files']['label']['label_meta']['awb']}")
 			else:
 				frappe.msgprint(f"Failed to create Eshipz shipment: {resp_json.get('meta', {}).get('message')}")
+				frappe.log_error(
+					message=f"Eshipz API Error:\n{frappe.as_json(resp_json, indent=2)}\n\nPayload Sent:\n{frappe.as_json(payload, indent=2)}",
+					title=f"Eshipz Order Creation Failed for Pickup Form {doc.get('name')}"
+				)
 			
 	except Exception as e:
 		frappe.log_error(message=frappe.get_traceback(), title="BO Eshipz Order Creation Failed For Pickup Form")

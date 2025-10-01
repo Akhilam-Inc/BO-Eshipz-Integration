@@ -3,6 +3,7 @@ frappe.ui.form.on('Pick List', {
     refresh:function(frm){
         if(frm.doc.docstatus === 1 && frm.doc.purpose === "Delivery"){
             frm.remove_custom_button('Delivery Note', 'Create');
+            frm.remove_custom_button('Create Delivery Note', 'Create');
             frm.add_custom_button('Make Delivery Note', function(){
                 frappe.model.open_mapped_doc({
                     method: "bo_eshipz_integration.bo_eshipz_integration.override.pick_list.create_delivery_note",

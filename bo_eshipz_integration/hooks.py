@@ -147,7 +147,7 @@ doc_events = {
         "validate":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.validate"
     },
     "Sales Invoice":{
-        "on_submit":"bo_eshipz_integration.eshipz_integration.override.sales_invoice.on_submit"
+        "on_submit":"bo_eshipz_integration.bo_eshipz_integration.override.sales_invoice.on_submit"
     }
 }
 

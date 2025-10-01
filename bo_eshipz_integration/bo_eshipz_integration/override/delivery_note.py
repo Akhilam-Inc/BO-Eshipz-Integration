@@ -10,7 +10,7 @@ def validate(self,method):
             item.qty = abs(item.qty) * -1
 
 def before_submit(self,method):
-    if self.custom_boxes:
+    if self.custom_bo_boxes:
         for idx, item in enumerate(self.custom_bo_boxes, start=1):
             if item.qty and not item.box_type:
                 frappe.throw(f"Row <strong>{idx}</strong> has a package value <strong>{item.qty}</strong> but no box type specified. Please correct this before submitting.")

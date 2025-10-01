@@ -74,7 +74,11 @@ def create_eshipz_order(doc):
             full_address = ", ".join(filter(None, add)) if add else ""
 
             country = frappe.db.get_value("Address", doc.get('shipping_address_name'), "country")
-            country_code = frappe.db.get_value("Country", country, "code")
+            country_code = None
+            if country:  # only lookup if not None
+                country_code = frappe.db.get_value("Country", country, "code")
+            
+            country_code = (country_code or "IN").upper()
 
             payload = json.dumps({
                 "data": [
@@ -93,7 +97,7 @@ def create_eshipz_order(doc):
                             "address": full_address,
                             "city": frappe.db.get_value("Address", doc.get('shipping_address_name'), "city") or "",
                             "state": frappe.db.get_value("Address", doc.get('shipping_address_name'), "state") or "",
-                            "country": country_code.upper(),
+                            "country": country_code,
                             "email": frappe.db.get_value("Address", doc.get('shipping_address_name'), "email_id") or "",
                             "zipcode": frappe.db.get_value("Address", doc.get('shipping_address_name'), "pincode") or "",
                             "phone": frappe.db.get_value("Address", doc.get('shipping_address_name'), "phone") or ""
@@ -149,7 +153,7 @@ def get_parcels_from_delivery_notes(delivery_notes):
     
     for delivery_note in delivery_notes:
         if delivery_note.custom_is_eshipz_order_created_bo == 0:
-            for box in delivery_note.custom_boxes:
+            for box in delivery_note.custom_bo_boxes:
                 if not box.box_type == "Dummy Box":
                     box_type_details = box_types.get(box.box_type, {}) 
                     parcel = {
