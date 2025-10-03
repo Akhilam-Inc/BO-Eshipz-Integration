@@ -53,6 +53,7 @@ frappe.ui.form.on('Pick List', {
         if (!frm.doc.custom_bo_current_box_type) return;
     
         let newCount = (frm.doc.custom_bo_current_box_count || 0) + 1;
+        console.log("New Box Count:", newCount);
         frm.set_value("custom_bo_current_box_count", newCount);
         frm.refresh_field("custom_bo_current_box_count");
 
@@ -87,7 +88,6 @@ frappe.ui.form.on('Pick List', {
                     stock_uom: location.stock_uom,
                     sales_order: location.sales_order,
                     sales_order_item: location.sales_order_item,
-                    use_serial_batch_fields: location.use_serial_batch_fields,
                     serial_no: location.serial_no,
                     batch_no: location.batch_no,
                     product_bundle_item: location.product_bundle_item,
@@ -164,7 +164,7 @@ frappe.ui.form.on('Pick List', {
     },
 
     custom_bo_scan_barcodes: function(frm) {
-        BoBarcodeScanner = class CustomBoBarcodeScanners  {
+        class CustomBoBarcodeScanners  {
             constructor(opts) {
                 this.frm = opts.frm;
                 // frappe.flags.trigger_from_barcode_scanner is used for custom scripts
@@ -548,7 +548,7 @@ frappe.ui.form.on('Pick List', {
                 }
                 
                 if(row.qty == row.picked_qty){
-                    row.custom_bo_box_count = frm.doc.custom_current_box_count + 1;
+                    row.custom_bo_box_count = frm.doc.custom_bo_current_box_count + 1;
                 }
                 
             }
@@ -640,7 +640,7 @@ frappe.ui.form.on('Pick List', {
             prompt_qty: frm.doc.prompt_qty,
             serial_no_field: "not_supported", // doesn't make sense for picklist without a separate field.
         };
-        const barcode_scanner = new BoBarcodeScanner(opts);
+        const barcode_scanner = new CustomBoBarcodeScanners(opts);
 		barcode_scanner.process_scan();
     }
 

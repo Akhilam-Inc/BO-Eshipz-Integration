@@ -46,7 +46,7 @@ frappe.ui.form.on("Dispatch and Transfer Form", {
 		frm.set_query('sales_person_address', () => {
 			return {
 				filters: {
-					'link_doctype':'Sales Person',
+					'link_doctype':'Sales Partner',
 					'link_name': frm.doc.sales_person
 				}
 			}
