@@ -55,7 +55,8 @@ frappe.ui.form.on("Dispatch and Transfer Form", {
 			return {
 				filters: {
 					'custom_is_eshipz_order_created':0,
-					'purpose': 'Material Transfer'
+					'purpose': 'Material Transfer',
+					'creation': ['>=', '2025-10-01 00:00:00']
 				}
 			}
 		})
@@ -127,6 +128,8 @@ frappe.ui.form.on("Dispatch and Transfer Form", {
 							let box = r.message[i];
 							let row = frm.add_child("parcels");
 							row.box_type = box.box_name;
+							row.weight = box.weight;
+							row.item = box.item_code;
 							row.qty = box.count;
 						}
 						frm.refresh_field("parcels");

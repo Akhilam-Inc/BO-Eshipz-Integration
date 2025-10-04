@@ -64,7 +64,7 @@ def create_eshipz_order(doc):
 			"order_source": "manual",
 			"parcel_contents": "Pets Grooming Products",
 			"is_document": "false",
-			"service_type": "eTailPrePaidAir",
+			"service_type": doc.get("service_type"),
 			"charged_weight": {
 				"unit": "KG",
 				"value": doc.get("total_weight")

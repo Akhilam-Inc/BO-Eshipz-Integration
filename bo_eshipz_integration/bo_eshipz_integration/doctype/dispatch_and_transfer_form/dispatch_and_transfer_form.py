@@ -90,6 +90,7 @@ def create_eshipz_order(doc):
 			country_code = frappe.db.get_value("Country", add.country, "code") if add.country else ""
 			return {
 				"first_name": name,
+				"company_name": name,
 				"address": ", ".join(filter(None, [add.address_line1, add.address_line2])),
 				"city": add.city or "",
 				"state": add.state or "",
@@ -215,26 +216,42 @@ def get_parcels(doc_name):
 	except Exception as e:
 		frappe.log_error(message=frappe.get_traceback(), title="Error Fetching Parcels")
 		return []
-	
 
 @frappe.whitelist()
 def get_pick_list_boxes(pick_list_name):
 	try:
 		pick_list = frappe.get_doc("Pick List", pick_list_name)
 		boxes = []
-		
 		box_dict = {}
+
+		# Count qty by box type
 		for item in pick_list.locations:
 			if item.custom_bo_box_type:
 				if item.custom_bo_box_type not in box_dict:
 					box_dict[item.custom_bo_box_type] = 0
 				box_dict[item.custom_bo_box_type] += item.qty or 0
+
 		if box_dict:
-			boxes = [{"box_name": box_type, "count": count} for box_type, count in box_dict.items()]
+			for box_type, count in box_dict.items():
+				# Fetch item_code and weight directly using db.get_value
+				item_code, weight = frappe.db.get_value(
+					"Bo Box Type",
+					box_type,
+					["item", "weight"]
+				) or (None, None)
+
+				boxes.append({
+					"box_name": box_type,
+					"count": count,
+					"item_code": item_code,
+					"weight": weight
+				})
+
 			return boxes
 		else:
 			frappe.throw("No boxes found in the Pick List.")
 			return []
+
 	except Exception as e:
 		frappe.log_error(message=frappe.get_traceback(), title="Error Fetching Pick List Boxes")
 		return []
