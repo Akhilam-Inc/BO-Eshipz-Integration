@@ -171,7 +171,7 @@ def schedule_update_delivery_date_for_si(start=0):
             "Sales Invoice",
             filters={
             "docstatus": 1,
-            "custom_custom_is_eshipz_order_created_bo_bo": 1,
+            "custom_is_eshipz_order_created_bo": 1,
             "custom_bo_eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
             "custom_bo_eshipz_tracking_number": ["!=", ""],
             "custom_bo_actual_delivery_date": ["in", [None, ""]],
