@@ -82,7 +82,7 @@ def create_eshipz_order(doc):
 				"ship_to": receiver,
 				"return_to": receiver,
 				"is_reverse": "true",
-				"is_to_pay": "false",
+				"is_to_pay": "true",
 				"parcels": parcels
 			}
 		}
