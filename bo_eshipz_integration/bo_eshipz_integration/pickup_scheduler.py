@@ -159,9 +159,9 @@ def get_delivered_pdf_and_fetch_pods_for_pf(start=0):
                 "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": "Delivered",
                 "eshipz_tracking_number": ["!=", ""],
-                "order_date": ["between", [filter_start_date, filter_end_date]]
+                "actual_pickup_date": ["between", [filter_start_date, filter_end_date]]
             },
-            fields=["name", "eshipz_tracking_number", "order_date"],
+            fields=["name", "eshipz_tracking_number", "actual_pickup_date"],
             order_by="creation desc",
             limit=BATCH_SIZE,
             start=start
