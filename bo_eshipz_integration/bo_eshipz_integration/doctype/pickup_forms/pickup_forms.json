@@ -10,6 +10,13 @@
   "customer",
   "customer_address",
   "customer_address_display",
+  "add_manual_address",
+  "address_line1",
+  "address_line2",
+  "city",
+  "state",
+  "pincode",
+  "country",
   "column_break_4irw",
   "pickup_request_date",
   "pickup_scheduled_date",
@@ -57,6 +64,7 @@
    "options": "Customer"
   },
   {
+   "depends_on": "eval:doc.add_manual_address == 0",
    "fieldname": "customer_address",
    "fieldtype": "Link",
    "label": "Customer Address",
@@ -192,12 +200,57 @@
    "fieldname": "service_type",
    "fieldtype": "Data",
    "label": "Service Type"
+  },
+  {
+   "default": "0",
+   "fieldname": "add_manual_address",
+   "fieldtype": "Check",
+   "label": "Add Manual Address"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "address_line1",
+   "fieldtype": "Data",
+   "label": "Address Line 1",
+   "mandatory_depends_on": "add_manual_address"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "address_line2",
+   "fieldtype": "Data",
+   "label": "Address Line 2"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "city",
+   "fieldtype": "Data",
+   "label": "City"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "label": "State",
+   "options": "\nAndaman and Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep Islands\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nOther Countries\nOther Territory\nPuducherry\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "pincode",
+   "fieldtype": "Data",
+   "label": "Postal Code"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
   }
  ],
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-10-04 12:17:01.854227",
+ "modified": "2026-01-01 16:08:35.553975",
  "modified_by": "Administrator",
  "module": "Bo Eshipz Integration",
  "name": "Pickup Forms",

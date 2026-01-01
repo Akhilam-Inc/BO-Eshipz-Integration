@@ -37,7 +37,10 @@ def create_eshipz_order(doc):
 
 		currency = frappe.db.get_single_value("Global Defaults", "default_currency")
 		# sender (residential)
-		sender = build_address(doc.get("customer"), doc.get("customer_address"), address_type="residential")
+		if not doc.get("add_manual_address"):
+			sender = build_address(doc.get("customer"), doc.get("customer_address"), address_type="residential")
+		else:
+			sender = add_address(doc)
 
 		# receiver (business)
 		receiver = build_address(doc.get("receiver_name"), doc.get("receiver_address"), address_type="business")
@@ -138,6 +141,22 @@ def build_address(name, address_link, address_type="residential"):
 		"email": add.email_id or "",
 		"country": (country_code or "").upper(),
 		"type": address_type
+	}
+
+def add_address(doc):
+	country_code = frappe.db.get_value("Country", doc.get("country"), "code") if doc.get("country") else ""
+	return {
+		"contact_name": doc.get("customer"),
+		"company_name": doc.get("customer"),
+		"street1": doc.get("address_line1") or "",
+		"street2": doc.get("address_line2") or "",
+		"city": doc.get("city") or "",
+		"state": doc.get("state") or "",
+		"postal_code": doc.get("pincode") or "",
+		"phone": doc.get("phone") or "9999999999",
+		"email": doc.get("email_id") or "",
+		"country": (country_code or "").upper(),
+		"type": "residential"
 	}
 
 def get_parcels(doc_name, currency):
