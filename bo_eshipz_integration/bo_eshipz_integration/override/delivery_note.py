@@ -118,7 +118,6 @@ def create_eshipz_order(self):
             return "success"
     except Exception as e:
         frappe.log_error("Eshipz Order Creation Failed From Delivery Note for BO Eshipz",message=frappe.get_traceback())
-        # frappe.log_error("Eshipz Order Body",message=payload)
         frappe.msgprint("Failed to send data to Eshipz.")
 
 
