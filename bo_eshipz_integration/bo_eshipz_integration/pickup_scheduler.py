@@ -8,6 +8,8 @@ from bo_eshipz_integration.bo_eshipz_integration.scheduler import (
     call_pod_api,
     schedule_next_batch,
 )
+import os
+from urllib.parse import urlparse
 
 BATCH_SIZE = 50
 
@@ -22,9 +24,9 @@ def schedule_update_delivery_date_for_pf(start=0):
             filters={
                 "docstatus": 1,
                 "custom_is_eshipz_order_created": 1,
-                "actual_delivery_date": ["is", "null"],
                 "eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
                 "eshipz_tracking_number": ["!=", ""],
+                "actual_delivery_date": ["is", "null"],
             },
             fields=["name"],
             order_by="creation desc",
@@ -33,41 +35,57 @@ def schedule_update_delivery_date_for_pf(start=0):
         )
 
         if not pickup_forms:
+            frappe.log_error(
+                "Batch Processing Complete",
+                "No more Pickup Forms left to process.",
+            )
             return
 
-        pf_names = [d.name for d in pickup_forms]
+        pf_names = [pf.name for pf in pickup_forms]
 
-        tracking_map = call_tracking_api_bulk(pf_names) or {}
-        updated = 0
+        # ✅ SINGLE BULK TRACKING API CALL
+        tracking_data = call_tracking_api_bulk(pf_names)
 
-        for pf in pf_names:
-            track = tracking_map.get(pf)
-            if not track:
+        tracking_map = {
+            t.get("q_num"): t
+            for t in tracking_data
+            if t.get("q_num")
+        }
+
+        updated_forms = []
+
+        for pf in pickup_forms:
+            pf_name = pf.name
+            shipment = tracking_map.get(pf_name)
+
+            if not shipment:
                 continue
 
-            delivery_date_str = track.get("delivery_date")
-            if not delivery_date_str:
-                continue
+            delivery_date_str = shipment.get("delivery_date")
 
-            delivery_date = datetime.strptime(
-                delivery_date_str, "%a, %d %b %Y %H:%M:%S %Z"
-            ).date()
+            # ✅ Delivered
+            if delivery_date_str:
+                delivery_date = datetime.strptime(
+                    delivery_date_str, "%a, %d %b %Y %H:%M:%S %Z"
+                ).strftime("%Y-%m-%d")
 
-            frappe.db.set_value(
-                "Pickup Forms",
-                pf,
-                {
-                    "actual_delivery_date": delivery_date,
-                    "eshipz_shipment_status": "Delivered",
-                },
-                update_modified=False,
+                frappe.db.set_value(
+                    "Pickup Forms",
+                    pf_name,
+                    {
+                        "actual_delivery_date": delivery_date,
+                        "eshipz_shipment_status": "Delivered",
+                    },
+                )
+                updated_forms.append(pf_name)
+
+        if updated_forms:
+            frappe.log_error(
+                "Updated Pickup Forms Delivery Date",
+                f"Successfully processed {len(updated_forms)} pickup forms",
             )
-            updated += 1
 
-        frappe.log_error(
-            "PF Delivery Date Batch Update", f"Updated {updated} pickup forms"
-        )
-
+        # 🔁 Next batch
         if len(pickup_forms) == BATCH_SIZE:
             schedule_next_batch(
                 "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_delivery_date_for_pf",
@@ -75,7 +93,11 @@ def schedule_update_delivery_date_for_pf(start=0):
             )
 
     except Exception:
-        frappe.log_error("PF Delivery Date Scheduler Error", frappe.get_traceback())
+        frappe.log_error(
+            "Error Updating Pickup Forms Delivery Date",
+            frappe.get_traceback(),
+        )
+
 
 
 # -------------------------------------------------Update Eshipz Shipment Status------------------------------------------------------
@@ -90,15 +112,12 @@ def schedule_update_shipping_detail_status_for_pf(start=0):
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
                 "actual_delivery_date": ["is", "null"],
-                "eshipz_shipment_status": [
-                    "not in",
-                    ["Delivered", "Shipment Not Created"],
-                ],
+                "eshipz_shipment_status": ["not in", ["Delivered", "Shipment Not Created"]],
             },
             fields=["name"],
             order_by="creation desc",
             limit=BATCH_SIZE,
-            start=start,
+            start=start
         )
 
         if not pickup_forms:
@@ -123,22 +142,27 @@ def schedule_update_shipping_detail_status_for_pf(start=0):
                 pf,
                 "eshipz_shipment_status",
                 status,
-                update_modified=False,
+                update_modified=False
             )
             updated += 1
 
         frappe.log_error(
-            "PF Shipment Status Batch Update", f"Updated {updated} pickup forms"
+            "PF Shipment Status Batch Update",
+            f"Updated {updated} pickup forms"
         )
 
         if len(pickup_forms) == BATCH_SIZE:
             schedule_next_batch(
                 "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_shipping_detail_status_for_pf",
-                start + BATCH_SIZE,
+                start + BATCH_SIZE
             )
 
     except Exception:
-        frappe.log_error("PF Shipment Status Scheduler Error", frappe.get_traceback())
+        frappe.log_error(
+            "PF Shipment Status Scheduler Error",
+            frappe.get_traceback()
+        )
+
 
 
 # -------------------------------------------------Get Delivered Invoices and Fetch PODs------------------------------------------------------
@@ -172,9 +196,9 @@ def get_delivered_pdf_and_fetch_pods_for_pf(start=0):
                 "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": "Delivered",
                 "eshipz_tracking_number": ["!=", ""],
-                "order_date": ["between", [filter_start_date, filter_end_date]],
+                "actual_pickup_date": ["between", [filter_start_date, filter_end_date]],
             },
-            fields=["name", "eshipz_tracking_number", "order_date"],
+            fields=["name", "eshipz_tracking_number", "actual_pickup_date"],
             order_by="creation desc",
             limit=BATCH_SIZE,
             start=start,
@@ -206,7 +230,7 @@ def get_delivered_pdf_and_fetch_pods_for_pf(start=0):
                 url = pod.get("data", {}).get("url")
 
                 if url:
-                    doc = attach_image_from_url("Pickup Forms", name, url)
+                    doc = attach_file_from_url("Pickup Forms", name, url)
                     if doc:
                         added.append(name)
                     else:
@@ -287,52 +311,42 @@ def check_pod_status(pdf_name):
         return {"status": "Error", "error": str(e)}
 
 
-def attach_image_from_url(doctype, docname, image_url, filename=None):
+def attach_file_from_url(doctype, docname, file_url, filename=None):
     """
-    Download image from URL and attach it to a Frappe document.
+    Download a file (image/pdf/zip/etc.) from URL and attach it to a Frappe document.
+    - ZIP → always {docname}.zip
+    - Non-ZIP → {safe_docname}_pod.{ext}
     """
-    import os
-    import tempfile
-    from urllib.parse import urlparse
-
     try:
-        # Fetch image data
-        response = requests.get(image_url, timeout=30)
+        # Fetch file data
+        response = requests.get(file_url, timeout=60)
         if response.status_code != 200:
             frappe.log_error(
-                f"Failed to download image from {image_url}. Status: {response.status_code}"
+                f"Failed to download file from {file_url}. Status: {response.status_code}"
             )
             return None
 
-        # Extract content
         content = response.content
-        content_type = response.headers.get("Content-Type", "")
 
-        # Determine file extension
-        if content_type and "/" in content_type:
-            ext = content_type.split("/")[-1]
-            # Handle common edge cases
-            if ext == "jpeg":
-                ext = "jpg"
-            elif ext not in ["jpg", "jpeg", "png", "gif", "pdf", "webp"]:
-                ext = "jpg"  # Default fallback
+        # Detect extension from URL
+        parsed_url = urlparse(file_url)
+        url_filename = os.path.basename(parsed_url.path)
+        ext = os.path.splitext(url_filename)[1].lower().lstrip(".")
+
+        # 🔹 Handle ZIP files → always {docname}.zip
+        if ext == "zip":
+            clean_docname = "".join(
+                c for c in docname if c.isalnum() or c in ("-", "_")
+            ).replace(".", "")
+            filename = f"{clean_docname}.zip"
         else:
-            # Try to get extension from URL
-            parsed_url = urlparse(image_url)
-            url_ext = os.path.splitext(parsed_url.path)[1].lower().lstrip(".")
-            ext = (
-                url_ext
-                if url_ext in ["jpg", "jpeg", "png", "gif", "pdf", "webp"]
-                else "jpg"
-            )
+            # 🔹 Handle non-ZIP files → {safe_docname}_pod.{ext}
+            safe_docname = "".join(
+                c for c in docname if c.isalnum() or c in ("-", "_")
+            ).rstrip()
+            filename = filename or f"{safe_docname}_pod.{ext or 'bin'}"
 
-        # Create a safe filename (remove special characters that cause path issues)
-        safe_docname = "".join(
-            c for c in docname if c.isalnum() or c in ("-", "_")
-        ).rstrip()
-        filename = filename or f"{safe_docname}_pod.{ext}"
-
-        # Check if file already exists
+        # Check if already exists
         existing_file = frappe.db.exists(
             "File",
             {
@@ -341,39 +355,26 @@ def attach_image_from_url(doctype, docname, image_url, filename=None):
                 "file_name": filename,
             },
         )
-
         if existing_file:
             frappe.log_error(f"File {filename} already exists for {doctype} {docname}")
             return frappe.get_doc("File", existing_file)
 
-        # Create temporary file first
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
-        try:
-            # Save the file using the temporary file path
-            file_doc = save_file(
-                fname=filename,
-                content=content,
-                dt=doctype,
-                dn=docname,
-                folder="Home/Attachments",  # Specify a proper folder
-                is_private=0,
-            )
-
-            return file_doc
-
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+        # Save file
+        file_doc = save_file(
+            fname=filename,
+            content=content,
+            dt=doctype,
+            dn=docname,
+            folder="Home/Attachments",
+            is_private=1 if ext == "zip" else 0,
+        )
+        return file_doc
 
     except requests.exceptions.RequestException as e:
-        frappe.log_error(f"Network error downloading image from {image_url}: {str(e)}")
+        frappe.log_error(f"Network error downloading file from {file_url}: {str(e)}")
         return None
     except Exception as e:
         frappe.log_error(
-            f"Error attaching image from {image_url} to {doctype} {docname}: {str(e)}"
+            f"Error attaching file from {file_url} to {doctype} {docname}: {str(e)}"
         )
         return None

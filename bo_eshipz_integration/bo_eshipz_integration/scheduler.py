@@ -5,6 +5,8 @@ from datetime import datetime
 from frappe.utils import add_days
 from frappe.utils.file_manager import save_file
 from frappe import _
+import os
+from urllib.parse import urlparse
 
 BATCH_SIZE = 50
 
@@ -192,8 +194,10 @@ def schedule_update_shipping_details_for_si(start=0):
                 )
                 shipment_found.append(si_name)
 
-        frappe.log_error("Shipment Found FOR SI", shipment_found)
-        frappe.log_error("Shipment Not Found FOR SI", shipment_not_found)
+        frappe.log_error(
+            "Batch Processing Summary of Shipping Details",
+            f"Shipment Found For SI: {shipment_found} | Shipment Not Found For SI: {shipment_not_found}",
+        )
 
         # 🔁 Next batch
         if len(sales_invoices) == BATCH_SIZE:
@@ -220,10 +224,7 @@ def schedule_update_delivery_date_for_si(start=0):
             filters={
                 "docstatus": 1,
                 "custom_custom_is_eshipz_order_created_bo_bo": 1,
-                "custom_bo_eshipz_shipment_status": [
-                    "not in",
-                    ["", "Shipment Not Created"],
-                ],
+                "custom_bo_eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
                 "custom_bo_eshipz_tracking_number": ["!=", ""],
                 "custom_bo_actual_delivery_date": ["is", "null"],
             },
@@ -245,7 +246,11 @@ def schedule_update_delivery_date_for_si(start=0):
         # ✅ SINGLE BULK TRACKING API CALL
         tracking_data = call_tracking_api_bulk(si_names)
 
-        tracking_map = {t.get("q_num"): t for t in tracking_data if t.get("q_num")}
+        tracking_map = {
+            t.get("q_num"): t
+            for t in tracking_data
+            if t.get("q_num")
+        }
 
         updated_invoices = []
 
@@ -293,7 +298,6 @@ def schedule_update_delivery_date_for_si(start=0):
             frappe.get_traceback(),
         )
 
-
 # -------------------------------------------------Update Eshipz Shipment Status------------------------------------------------------
 
 
@@ -329,7 +333,11 @@ def schedule_update_shipping_detail_status_for_si(start=0):
         # ✅ SINGLE BULK TRACKING API CALL
         tracking_data = call_tracking_api_bulk(si_names)
 
-        tracking_map = {t.get("q_num"): t for t in tracking_data if t.get("q_num")}
+        tracking_map = {
+            t.get("q_num"): t
+            for t in tracking_data
+            if t.get("q_num")
+        }
 
         updated_invoices = []
 
@@ -403,9 +411,9 @@ def get_delivered_pdf_and_fetch_pods_for_si(start=0):
                 "custom_is_eshipz_order_created_bo": 1,
                 "custom_bo_eshipz_shipment_status": "Delivered",
                 "custom_bo_eshipz_tracking_number": ["!=", ""],
-                "order_date": ["between", [filter_start_date, filter_end_date]],
+                "posting_date": ["between", [filter_start_date, filter_end_date]],
             },
-            fields=["name", "custom_bo_eshipz_tracking_number", "order_date"],
+            fields=["name", "custom_bo_eshipz_tracking_number", "posting_date"],
             order_by="creation desc",
             limit=BATCH_SIZE,
             start=start,
@@ -437,7 +445,7 @@ def get_delivered_pdf_and_fetch_pods_for_si(start=0):
                 url = pod.get("data", {}).get("url")
 
                 if url:
-                    doc = attach_image_from_url("Sales Invoice", name, url)
+                    doc = attach_file_from_url("Sales Invoice", name, url)
                     if doc:
                         added.append(name)
                     else:
@@ -518,52 +526,42 @@ def check_pod_status(pdf_name):
         return {"status": "Error", "error": str(e)}
 
 
-def attach_image_from_url(doctype, docname, image_url, filename=None):
+def attach_file_from_url(doctype, docname, file_url, filename=None):
     """
-    Download image from URL and attach it to a Frappe document.
+    Download a file (image/pdf/zip/etc.) from URL and attach it to a Frappe document.
+    - ZIP → always {docname}.zip
+    - Non-ZIP → {safe_docname}_pod.{ext}
     """
-    import os
-    import tempfile
-    from urllib.parse import urlparse
-
     try:
-        # Fetch image data
-        response = requests.get(image_url, timeout=30)
+        # Fetch file data
+        response = requests.get(file_url, timeout=60)
         if response.status_code != 200:
             frappe.log_error(
-                f"Failed to download image from {image_url}. Status: {response.status_code}"
+                f"Failed to download file from {file_url}. Status: {response.status_code}"
             )
             return None
 
-        # Extract content
         content = response.content
-        content_type = response.headers.get("Content-Type", "")
 
-        # Determine file extension
-        if content_type and "/" in content_type:
-            ext = content_type.split("/")[-1]
-            # Handle common edge cases
-            if ext == "jpeg":
-                ext = "jpg"
-            elif ext not in ["jpg", "jpeg", "png", "gif", "pdf", "webp"]:
-                ext = "jpg"  # Default fallback
+        # Detect extension from URL
+        parsed_url = urlparse(file_url)
+        url_filename = os.path.basename(parsed_url.path)
+        ext = os.path.splitext(url_filename)[1].lower().lstrip(".")
+
+        # 🔹 Handle ZIP files → always {docname}.zip
+        if ext == "zip":
+            clean_docname = "".join(
+                c for c in docname if c.isalnum() or c in ("-", "_")
+            ).replace(".", "")
+            filename = f"{clean_docname}.zip"
         else:
-            # Try to get extension from URL
-            parsed_url = urlparse(image_url)
-            url_ext = os.path.splitext(parsed_url.path)[1].lower().lstrip(".")
-            ext = (
-                url_ext
-                if url_ext in ["jpg", "jpeg", "png", "gif", "pdf", "webp"]
-                else "jpg"
-            )
+            # 🔹 Handle non-ZIP files → {safe_docname}_pod.{ext}
+            safe_docname = "".join(
+                c for c in docname if c.isalnum() or c in ("-", "_")
+            ).rstrip()
+            filename = filename or f"{safe_docname}_pod.{ext or 'bin'}"
 
-        # Create a safe filename (remove special characters that cause path issues)
-        safe_docname = "".join(
-            c for c in docname if c.isalnum() or c in ("-", "_")
-        ).rstrip()
-        filename = filename or f"{safe_docname}_pod.{ext}"
-
-        # Check if file already exists
+        # Check if already exists
         existing_file = frappe.db.exists(
             "File",
             {
@@ -572,39 +570,26 @@ def attach_image_from_url(doctype, docname, image_url, filename=None):
                 "file_name": filename,
             },
         )
-
         if existing_file:
             frappe.log_error(f"File {filename} already exists for {doctype} {docname}")
             return frappe.get_doc("File", existing_file)
 
-        # Create temporary file first
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-
-        try:
-            # Save the file using the temporary file path
-            file_doc = save_file(
-                fname=filename,
-                content=content,
-                dt=doctype,
-                dn=docname,
-                folder="Home/Attachments",  # Specify a proper folder
-                is_private=0,
-            )
-
-            return file_doc
-
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
+        # Save file
+        file_doc = save_file(
+            fname=filename,
+            content=content,
+            dt=doctype,
+            dn=docname,
+            folder="Home/Attachments",
+            is_private=1 if ext == "zip" else 0,
+        )
+        return file_doc
 
     except requests.exceptions.RequestException as e:
-        frappe.log_error(f"Network error downloading image from {image_url}: {str(e)}")
+        frappe.log_error(f"Network error downloading file from {file_url}: {str(e)}")
         return None
     except Exception as e:
         frappe.log_error(
-            f"Error attaching image from {image_url} to {doctype} {docname}: {str(e)}"
+            f"Error attaching file from {file_url} to {doctype} {docname}: {str(e)}"
         )
         return None

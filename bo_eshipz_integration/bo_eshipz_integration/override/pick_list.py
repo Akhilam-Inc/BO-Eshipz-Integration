@@ -89,7 +89,7 @@ def create_dn_with_so(sales_dict, pick_list):
 		for so in sales_dict[customer]:
 			delivery_note = None
 			kwargs = {"skip_item_mapping": True}
-			delivery_note = create_delivery_note_from_sales_order(so, delivery_note, kwargs=kwargs)
+			delivery_note = create_delivery_note_from_sales_order(so, delivery_note, skip_item_mapping=True)
 			
 			break
 		if delivery_note:
@@ -270,7 +270,6 @@ def map_pl_locations(pick_list, item_mapper, delivery_note, sales_order=None):
 			dn_item.qty = flt(location.picked_qty) / (flt(location.conversion_factor) or 1)
 			dn_item.batch_no = location.batch_no
 			dn_item.serial_no = location.serial_no
-			dn_item.use_serial_batch_fields = location.use_serial_batch_fields
 			dn_item.against_sales_order = location.sales_order
 			dn_item.so_detail = location.sales_order_item
 
