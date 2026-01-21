@@ -15,8 +15,9 @@
   "address_line2",
   "city",
   "state",
-  "pincode",
   "country",
+  "email_id",
+  "phone",
   "column_break_4irw",
   "pickup_request_date",
   "pickup_scheduled_date",
@@ -31,7 +32,6 @@
   "vendor_description",
   "slug",
   "vendor_id",
-  "service_type",
   "section_break_dmis",
   "parcels",
   "amended_from",
@@ -196,12 +196,6 @@
    "label": "Total Weight"
   },
   {
-   "fetch_from": "vendor_description.service_type",
-   "fieldname": "service_type",
-   "fieldtype": "Data",
-   "label": "Service Type"
-  },
-  {
    "default": "0",
    "fieldname": "add_manual_address",
    "fieldtype": "Check",
@@ -211,8 +205,7 @@
    "depends_on": "add_manual_address",
    "fieldname": "address_line1",
    "fieldtype": "Data",
-   "label": "Address Line 1",
-   "mandatory_depends_on": "add_manual_address"
+   "label": "Address Line 1"
   },
   {
    "depends_on": "add_manual_address",
@@ -235,22 +228,31 @@
   },
   {
    "depends_on": "add_manual_address",
-   "fieldname": "pincode",
-   "fieldtype": "Data",
-   "label": "Postal Code"
-  },
-  {
-   "depends_on": "add_manual_address",
    "fieldname": "country",
    "fieldtype": "Link",
    "label": "Country",
    "options": "Country"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "email_id",
+   "fieldtype": "Data",
+   "label": "Email ID",
+   "options": "Email"
+  },
+  {
+   "depends_on": "add_manual_address",
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone",
+   "options": "Phone"
   }
  ],
+ "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-01 16:08:35.553975",
+ "modified": "2026-01-21 14:35:49.007193",
  "modified_by": "Administrator",
  "module": "Bo Eshipz Integration",
  "name": "Pickup Forms",
@@ -271,6 +273,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []
