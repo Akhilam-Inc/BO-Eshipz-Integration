@@ -10,7 +10,6 @@
   "vendor_name",
   "vendor_id",
   "vendor_slug",
-  "service_type",
   "column_break_q66k",
   "is_forward",
   "is_reverse"
@@ -47,17 +46,12 @@
    "fieldname": "is_reverse",
    "fieldtype": "Check",
    "label": "Is Reverse"
-  },
-  {
-   "fieldname": "service_type",
-   "fieldtype": "Data",
-   "label": "Service Type"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-23 12:28:43.324986",
+ "modified": "2026-01-23 13:26:48.579744",
  "modified_by": "Administrator",
  "module": "Bo Eshipz Integration",
  "name": "Vendor Services",
