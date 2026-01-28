@@ -15,6 +15,7 @@
   "address_line2",
   "city",
   "state",
+  "pincode",
   "country",
   "email_id",
   "phone",
@@ -254,13 +255,18 @@
    "fieldname": "service_type",
    "fieldtype": "Data",
    "label": "Service Type"
+  },
+  {
+   "fieldname": "pincode",
+   "fieldtype": "Data",
+   "label": "Postal Code"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-23 12:29:37.110578",
+ "modified": "2026-01-28 18:35:01.582583",
  "modified_by": "Administrator",
  "module": "Bo Eshipz Integration",
  "name": "Pickup Forms",
