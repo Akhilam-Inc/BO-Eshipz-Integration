@@ -645,7 +645,7 @@ def schedule_update_shipping_detail_status_for_si():
                 "docstatus": 1,
                 "is_return": 0,
                 "custom_is_eshipz_order_created_bo": 1,
-                "custom_bo_actual_delivery_date": ["is", "null"],
+                "custom_bo_actual_delivery_date": ["in", ["", None]],
                 "custom_bo_eshipz_shipment_status": [
                     "not in",
                     ["Delivered", "Shipment Not Created"],

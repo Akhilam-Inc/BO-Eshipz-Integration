@@ -39,7 +39,7 @@ def schedule_update_delivery_date_for_pf():
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
-                "actual_delivery_date": ["is", "not set"],
+                "actual_delivery_date": ["in", ["", None]],
             }
 
             # Cursor-based pagination
@@ -240,7 +240,7 @@ def schedule_update_shipping_detail_status_for_pf():
             filters = {
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
-                "actual_delivery_date": ["is", "not set"],
+                "actual_delivery_date": ["in", ["", None]],
                 "eshipz_shipment_status": [
                     "not in",
                     ["Delivered", "Shipment Not Created", "Cancelled"],

@@ -38,7 +38,7 @@ def schedule_update_shipping_details_for_dtf():
             filters = {
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
-                "eshipz_tracking_number": ["is", "not set"],
+                "eshipz_tracking_number": ["=", ""],
                 "eshipz_shipment_status": ["in", [None, "", "Shipment Not Created"]],
             }
 
@@ -221,7 +221,7 @@ def schedule_update_delivery_date_for_dtf():
                 "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
                 "eshipz_tracking_number": ["!=", ""],
-                "actual_delivery_date": ["is", "not set"],
+                "actual_delivery_date": ["in", ["", None]],
             }
 
             if last_processed_id:
@@ -382,7 +382,7 @@ def schedule_update_shipping_detail_status_for_dtf():
             filters = {
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
-                "actual_delivery_date": ["is", "not set"],
+                "actual_delivery_date": ["in", ["", None]],
                 "eshipz_shipment_status": [
                     "not in",
                     ["Delivered", "Shipment Not Created", "Cancelled"],
