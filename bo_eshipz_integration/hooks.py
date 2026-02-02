@@ -156,21 +156,15 @@ doc_events = {
 
 scheduler_events = {
 
-    "weekly": [
-		"bo_eshipz_integration.bo_eshipz_integration.scheduler.get_delivered_pdf_and_fetch_pods_for_si",
-        "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.get_delivered_pdf_and_fetch_pods_for_dtf",
-        "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_delivered_pdf_and_fetch_pods_for_pf"
-	],
-
     "cron":{
         # Sales Invoice
         "0 18 * * *":[
             "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_details_for_si",
             "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_detail_status_for_si"
         ],
-        # "45 1 * * *":[
-        #     "bo_eshipz_integration.bo_eshipz_integration.scheduler.get_delivered_pdf_and_fetch_pods_for_si"
-        # ],
+        "45 1 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.scheduler.get_delivered_invoices_and_fetch_pods"
+        ],
         "45 2 * * *":[
             "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_delivery_date_for_si"
         ],
@@ -180,9 +174,9 @@ scheduler_events = {
             "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_shipping_details_for_dtf",
             "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_shipping_detail_status_for_dtf"
         ],
-        # "30 3 * * *":[
-        #     "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.get_delivered_pdf_and_fetch_pods_for_dtf"
-        # ],
+        "30 3 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.get_delivered_pdf_and_fetch_pods_for_dtf"
+        ],
         "15 4 * * *":[
             "bo_eshipz_integration.bo_eshipz_integration.dispatch_scheduler.schedule_update_delivery_date_for_dtf"
         ],
@@ -191,9 +185,9 @@ scheduler_events = {
         "0 4 * * *":[
             "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_shipping_detail_status_for_pf"
         ],
-        # "45 4 * * *":[
-        #     "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_delivered_pdf_and_fetch_pods_for_pf"
-        # ],
+        "45 4 * * *":[
+            "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_delivered_pdf_and_fetch_pods_for_pf"
+        ],
         "30 5 * * *":[
             "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_delivery_date_for_pf"
         ]

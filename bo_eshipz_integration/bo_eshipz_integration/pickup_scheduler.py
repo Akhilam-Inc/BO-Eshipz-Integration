@@ -1,380 +1,533 @@
 import frappe
-import requests
 from datetime import datetime
-from frappe.utils import add_days
-from frappe.utils.file_manager import save_file
+import time
 from bo_eshipz_integration.bo_eshipz_integration.scheduler import (
     call_tracking_api_bulk,
-    call_pod_api,
-    schedule_next_batch,
+    call_shipment_api_bulk,
+    attach_file_from_url
 )
-import os
-from urllib.parse import urlparse
 
-BATCH_SIZE = 50
+BATCH_SIZE = 50  # Records per batch
+API_CALL_LIMIT = 350  # API calls allowed
+RECORDS_PER_API_CALL = 50  # How many records sent in one API call
+RATE_LIMIT_BUFFER = 10  # Safety buffer
 
 # ---------------------------------------------------Update Eshipz Shipment Actual Delivery Date-------------------------------------------------
 
 
 @frappe.whitelist()
-def schedule_update_delivery_date_for_pf(start=0):
+def schedule_update_delivery_date_for_pf():
+    """
+    Updates delivery dates for pickup forms respecting API rate limits.
+    Stops at 340 API calls to avoid hitting the 350 limit.
+    """
     try:
-        pickup_forms = frappe.db.get_all(
-            "Pickup Forms",
-            filters={
+        total_processed = 0
+        total_updated = 0
+        api_calls_made = 0
+        error_count = 0
+        max_api_calls = API_CALL_LIMIT - RATE_LIMIT_BUFFER
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(f"Starting delivery date sync at {datetime.now()}")
+
+        while api_calls_made < max_api_calls:
+            iteration += 1
+
+            filters = {
                 "docstatus": 1,
-                "custom_is_eshipz_order_created": 1,
+                "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
-                "eshipz_tracking_number": ["!=", ""],
-                "actual_delivery_date": ["is", "null"],
-            },
-            fields=["name"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
+                "actual_delivery_date": ["is", "not set"],
+            }
 
-        if not pickup_forms:
-            frappe.log_error(
-                "Batch Processing Complete",
-                "No more Pickup Forms left to process.",
+            # Cursor-based pagination
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            pickup_forms = frappe.db.get_all(
+                "Pickup Forms",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
             )
-            return
 
-        pf_names = [pf.name for pf in pickup_forms]
+            if not pickup_forms:
+                frappe.logger().info("No more records to process")
+                break
 
-        # ✅ SINGLE BULK TRACKING API CALL
-        tracking_data = call_tracking_api_bulk(pf_names)
+            names = [d.name for d in pickup_forms]
+            last_processed_id = names[-1]
+            total_processed += len(names)
 
-        tracking_map = {
-            t.get("q_num"): t
-            for t in tracking_data
-            if t.get("q_num")
-        }
+            # Make API call with error handling
+            try:
+                tracking_data = call_tracking_api_bulk(names)
+                api_calls_made += 1
 
-        updated_forms = []
-
-        for pf in pickup_forms:
-            pf_name = pf.name
-            shipment = tracking_map.get(pf_name)
-
-            if not shipment:
-                continue
-
-            delivery_date_str = shipment.get("delivery_date")
-
-            # ✅ Delivered
-            if delivery_date_str:
-                delivery_date = datetime.strptime(
-                    delivery_date_str, "%a, %d %b %Y %H:%M:%S %Z"
-                ).strftime("%Y-%m-%d")
-
-                frappe.db.set_value(
-                    "Pickup Forms",
-                    pf_name,
-                    {
-                        "actual_delivery_date": delivery_date,
-                        "eshipz_shipment_status": "Delivered",
-                    },
+                frappe.logger().info(
+                    f"API Call {api_calls_made}/{max_api_calls} - "
+                    f"Batch {iteration} - {len(names)} records"
                 )
-                updated_forms.append(pf_name)
 
-        if updated_forms:
+                tracking_map = {
+                    d.get("order_id"): d
+                    for d in tracking_data or []
+                    if d.get("order_id")
+                }
+
+                # Process each record individually with error handling
+                for pdf_name in names:
+                    try:
+                        shipment = tracking_map.get(pdf_name)
+                        if not shipment:
+                            continue
+
+                        update_values = {}
+
+                        # Handle actual delivery date
+                        if shipment.get("delivery_date"):
+                            try:
+                                dt = datetime.strptime(
+                                    shipment["delivery_date"],
+                                    "%a, %d %b %Y %H:%M:%S %Z",
+                                )
+                                update_values.update(
+                                    {
+                                        "actual_delivery_date": dt.strftime("%Y-%m-%d"),
+                                        "eshipz_shipment_status": "Delivered",
+                                    }
+                                )
+                            except ValueError as date_error:
+                                frappe.log_error(
+                                    f"Invalid delivery_date format for {pdf_name}",
+                                    f"Date: {shipment.get('delivery_date')}\nError: {str(date_error)}",
+                                )
+                                error_count += 1
+
+                        # Handle expected delivery date
+                        elif shipment.get("expected_delivery_date"):
+                            try:
+                                dt = datetime.strptime(
+                                    shipment["expected_delivery_date"],
+                                    "%a, %d %b %Y %H:%M:%S %Z",
+                                )
+                                update_values["expected_delivery_date"] = dt.strftime(
+                                    "%Y-%m-%d"
+                                )
+                            except ValueError as date_error:
+                                frappe.log_error(
+                                    f"Invalid expected_delivery_date format for {pdf_name}",
+                                    f"Date: {shipment.get('expected_delivery_date')}\nError: {str(date_error)}",
+                                )
+                                error_count += 1
+
+                        # Update database if we have values
+                        if update_values:
+                            frappe.db.set_value(
+                                "Pickup Forms",
+                                pdf_name,
+                                update_values,
+                                update_modified=False,
+                            )
+                            total_updated += 1
+
+                    except Exception as record_error:
+                        error_count += 1
+                        frappe.log_error(
+                            f"Error processing record {pdf_name}",
+                            f"Shipment data: {shipment}\nError: {str(record_error)}",
+                        )
+                        continue
+
+                # Commit after each batch
+                frappe.db.commit()
+
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+
+            except Exception as api_error:
+                api_calls_made += 1  # Count failed calls too
+                error_count += 1
+                frappe.log_error(
+                    f"API Error - Batch {iteration}",
+                    f"Batch starting at {names[0]}\nError: {str(api_error)}",
+                )
+                continue  # Skip failed batch, continue with next
+
+            # Check if approaching API limit
+            if api_calls_made >= max_api_calls:
+                frappe.logger().warning(
+                    f"Reached API call limit ({api_calls_made}/{max_api_calls}). "
+                    f"Stopping gracefully. Last processed: {last_processed_id}"
+                )
+                break
+
+        # Final summary
+        has_more_records = api_calls_made >= max_api_calls
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
+
+        summary = f"""
+            Delivery Date Sync Summary:
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            Status: {status}
+            Total Records Processed: {total_processed}
+            Total Records Updated: {total_updated}
+            API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+            Batches Processed: {iteration}
+            Errors Encountered: {error_count}
+            Last Processed ID: {last_processed_id or "N/A"}
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+
+        if has_more_records:
             frappe.log_error(
-                "Updated Pickup Forms Delivery Date",
-                f"Successfully processed {len(updated_forms)} pickup forms",
+                "Delivery Date Sync Paused - API Limit Reached",
+                summary
+                + f"\n\nℹ️ Run the job again to continue from: {last_processed_id}",
             )
+        elif error_count > 0:
+            frappe.log_error("Delivery Date Sync Completed with Errors", summary)
+        else:
+            frappe.log_error("Delivery Date Sync Completed Successfully", summary)
 
-        # 🔁 Next batch
-        if len(pickup_forms) == BATCH_SIZE:
-            schedule_next_batch(
-                "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_delivery_date_for_pf",
-                start + BATCH_SIZE,
-            )
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "updated": total_updated,
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
+            "last_id": last_processed_id,
+        }
 
     except Exception:
         frappe.log_error(
-            "Error Updating Pickup Forms Delivery Date",
-            frappe.get_traceback(),
+            "Delivery Date Sync Critical Failure",
+            f"Processed: {total_processed}\n"
+            f"Updated: {total_updated}\n"
+            f"API Calls: {api_calls_made}\n"
+            f"Errors: {error_count}\n\n"
+            f"{frappe.get_traceback()}",
         )
-
+        raise
 
 
 # -------------------------------------------------Update Eshipz Shipment Status------------------------------------------------------
 
 
 @frappe.whitelist()
-def schedule_update_shipping_detail_status_for_pf(start=0):
+def schedule_update_shipping_detail_status_for_pf():
+    """
+    Processes pickup forms respecting API rate limits.
+    Stops at 340 API calls (350 - 10 buffer) to avoid hitting limit.
+    """
     try:
-        pickup_forms = frappe.db.get_all(
-            "Pickup Forms",
-            filters={
+        total_updated = 0
+        total_processed = 0
+        api_calls_made = 0
+        max_api_calls = API_CALL_LIMIT - RATE_LIMIT_BUFFER  # 340 calls
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(f"Starting shipment sync at {datetime.now()}")
+
+        while api_calls_made < max_api_calls:
+            iteration += 1
+
+            filters = {
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
-                "actual_delivery_date": ["is", "null"],
-                "eshipz_shipment_status": ["not in", ["Delivered", "Shipment Not Created"]],
-            },
-            fields=["name"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start
-        )
+                "actual_delivery_date": ["is", "not set"],
+                "eshipz_shipment_status": [
+                    "not in",
+                    ["Delivered", "Shipment Not Created", "Cancelled"],
+                ],
+            }
 
-        if not pickup_forms:
-            return
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
 
-        pf_names = [d.name for d in pickup_forms]
-
-        tracking_map = call_tracking_api_bulk(pf_names) or {}
-        updated = 0
-
-        for pf in pf_names:
-            track = tracking_map.get(pf)
-            if not track:
-                continue
-
-            status = track.get("tag")
-            if not status or status == "Delivered":
-                continue
-
-            frappe.db.set_value(
+            pickup_forms = frappe.db.get_all(
                 "Pickup Forms",
-                pf,
-                "eshipz_shipment_status",
-                status,
-                update_modified=False
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
             )
-            updated += 1
 
-        frappe.log_error(
-            "PF Shipment Status Batch Update",
-            f"Updated {updated} pickup forms"
-        )
+            if not pickup_forms:
+                frappe.logger().info("No more records to process")
+                break
 
-        if len(pickup_forms) == BATCH_SIZE:
-            schedule_next_batch(
-                "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.schedule_update_shipping_detail_status_for_pf",
-                start + BATCH_SIZE
+            names = [d.name for d in pickup_forms]
+            last_processed_id = names[-1]
+            total_processed += len(names)
+
+            # Make API call
+            try:
+                tracking_data = call_tracking_api_bulk(names)
+                api_calls_made += 1  # Increment API call counter
+
+                frappe.logger().info(
+                    f"API Call {api_calls_made}/{max_api_calls} - Batch {iteration} - {len(names)} records"
+                )
+
+                tracking_map = {
+                    d.get("order_id"): d for d in tracking_data or [] if d.get("order_id")
+                }
+
+                # Process each record
+                for pdf_name in names:
+                    try:
+                        shipment = tracking_map.get(pdf_name)
+                        if not shipment:
+                            continue
+
+                        new_status = None
+                        if shipment.get("shipment_status") == "cancelled":
+                            new_status = "Cancelled"
+                        elif shipment.get("tag"):
+                            new_status = shipment.get("tag")
+
+                        if new_status:
+                            frappe.db.set_value(
+                                "Pickup Forms",
+                                pdf_name,
+                                "eshipz_shipment_status",
+                                new_status,
+                                update_modified=False,
+                            )
+                            total_updated += 1
+
+                    except Exception as e:
+                        frappe.log_error(f"Error processing record {pdf_name}", str(e))
+                        continue
+
+                frappe.db.commit()
+
+                # Small delay to avoid rate limiting
+                time.sleep(0.1)
+
+            except Exception as e:
+                api_calls_made += 1  # Count failed calls too
+                frappe.log_error(
+                    f"API Error - Batch {iteration}",
+                    f"Batch starting at {names[0]}\nError: {str(e)}",
+                )
+                continue
+
+            # Check if approaching limit
+            if api_calls_made >= max_api_calls:
+                frappe.logger().warning(
+                    f"Reached API call limit ({api_calls_made}/{max_api_calls}). "
+                    f"Stopping gracefully. Last processed: {last_processed_id}"
+                )
+                break
+
+        # Final summary
+        summary = f"""
+            Shipment Status Sync Summary:
+            - Total Records Processed: {total_processed}
+            - Total Records Updated: {total_updated}
+            - API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+            - Batches Processed: {iteration}
+            - Last Processed ID: {last_processed_id or "N/A"}
+            - Status: {"COMPLETED" if not pickup_forms else "PAUSED - More records pending"}
+        """
+
+        if api_calls_made >= max_api_calls:
+            frappe.log_error(
+                "Shipment Sync Paused - API Limit Reached",
+                summary
+                + f"\n\nRun the job again to continue from: {last_processed_id}",
             )
+        else:
+            frappe.log_error("Shipment Sync Completed", summary)
+
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "updated": total_updated,
+            "api_calls": api_calls_made,
+            "has_more": api_calls_made >= max_api_calls,
+        }
 
     except Exception:
         frappe.log_error(
-            "PF Shipment Status Scheduler Error",
-            frappe.get_traceback()
+            "Shipment Sync Critical Failure",
+            f"Processed: {total_processed}\nAPI Calls: {api_calls_made}\n\n{frappe.get_traceback()}",
         )
-
+        raise
 
 
 # -------------------------------------------------Get Delivered Invoices and Fetch PODs------------------------------------------------------
 
 
-def get_delivered_pdf_and_fetch_pods_for_pf(start=0):
-    BATCH_SIZE = 50
+@frappe.whitelist()
+def get_delivered_pdf_and_fetch_pods_for_pf():
+    """
+    Fetch PODs for delivered Pickup Forms using BULK shipment API.
+    Cursor-based batching + API limit safe.
+    """
 
     try:
-        # Get current fiscal year dates
-        from erpnext.accounts.utils import get_fiscal_year
+        total_processed = 0
+        added, exists, failed, skipped = [], [], [], []
 
-        fiscal_year, fiscal_start_date, fiscal_end_date = get_fiscal_year(
-            frappe.utils.today()
+        api_calls_made = 0
+        error_count = 0
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(
+            f"Pickup Forms POD Sync started at {datetime.now()}"
         )
 
-        if not fiscal_year:
-            frappe.log_error(
-                "POD Processing Error", "No active fiscal year found for current date."
-            )
-            return
+        def safe_docname(name):
+            return "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
 
-        # Calculate date range: 30 days before fiscal year start to fiscal year end
-        filter_start_date = add_days(fiscal_start_date, -31)
-        filter_end_date = fiscal_end_date
+        while api_calls_made < API_CALL_LIMIT:
+            iteration += 1
 
-        pickup_dispatch_forms = frappe.db.get_all(
-            "Pickup Forms",
-            filters={
+            # ---- Pickup Forms Filters ----
+            filters = {
                 "docstatus": 1,
                 "is_eshipz_order_created": 1,
                 "eshipz_shipment_status": "Delivered",
                 "eshipz_tracking_number": ["!=", ""],
-                "actual_pickup_date": ["between", [filter_start_date, filter_end_date]],
-            },
-            fields=["name", "eshipz_tracking_number", "actual_pickup_date"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
+            }
 
-        if not pickup_dispatch_forms:
-            frappe.log_error(
-                "POD Processing Complete",
-                "No more delivered pickup dispatch forms left in the specified date range.",
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            pickup_forms = frappe.db.get_all(
+                "Pickup Forms",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
             )
-            return
 
-        added, exists, failed, skipped = [], [], [], []
+            if not pickup_forms:
+                frappe.logger().info("No more delivered Pickup Forms to process")
+                break
 
-        for pdf in pickup_dispatch_forms:
-            name = pdf.name
-            tracking_no = (pdf.eshipz_tracking_number or "").split(" - ")[0]
+            form_names = [f.name for f in pickup_forms]
+            last_processed_id = form_names[-1]
 
-            if not tracking_no:
-                skipped.append(name)
+            # ---- Existing POD check (bulk) ----
+            existing_files = frappe.db.get_all(
+                "File",
+                filters={
+                    "attached_to_doctype": "Pickup Forms",
+                    "attached_to_name": ["in", form_names],
+                    "file_name": ["like", "%pod%"],
+                },
+                fields=["attached_to_name"],
+            )
+            existing_pod_map = {f.attached_to_name for f in existing_files}
+
+            frappe.logger().info(
+                f"PF Batch {iteration} | Records {len(form_names)} | "
+                f"API Calls {api_calls_made}/{API_CALL_LIMIT}"
+            )
+
+            # ---- BULK Shipment API Call ----
+            shipment_data = call_shipment_api_bulk(form_names)
+            api_calls_made += 1
+
+            if not shipment_data:
+                failed.extend(form_names)
+                total_processed += len(form_names)
                 continue
 
-            if get_pod_image_for_pickup_dispatch_forms(name):
-                exists.append(name)
-                continue
+            # ---- Build POD Map ----
+            pod_map = {
+                s.get("customer_referenc"): s.get("pod_link")
+                for s in shipment_data
+                if s.get("customer_referenc") and s.get("pod_link")
+            }
 
-            try:
-                pod = call_pod_api(tracking_no)
-                url = pod.get("data", {}).get("url")
+            # ---- Attach PODs ----
+            for name in form_names:
 
-                if url:
-                    doc = attach_file_from_url("Pickup Forms", name, url)
-                    if doc:
+                if name in existing_pod_map:
+                    exists.append(name)
+                    total_processed += 1
+                    continue
+
+                pod_url = pod_map.get(name)
+                if not pod_url:
+                    failed.append(name)
+                    total_processed += 1
+                    continue
+
+                try:
+                    file_doc = attach_file_from_url(
+                        "Pickup Forms",
+                        name,
+                        pod_url,
+                        safe_name=safe_docname(name),
+                    )
+
+                    if file_doc:
                         added.append(name)
                     else:
                         failed.append(name)
-                else:
+
+                except Exception:
                     failed.append(name)
-            except Exception as e:
-                failed.append(name)
-                frappe.log_error(f"POD Error - {name}", str(e))
+                    error_count += 1
+                    frappe.log_error(
+                        f"Pickup Forms POD Attach Error - {name}",
+                        frappe.get_traceback(),
+                    )
 
-        # Summary log with Forms names instead of counts
-        frappe.log_error(
-            "POD Summary",
-            f"Start={start} | Date Range: {filter_start_date} to {filter_end_date} | Added={added} | Exists={exists} | Failed={failed} | Skipped={skipped}",
-        )
+                total_processed += 1
 
-        # Enqueue next batch
-        if len(pickup_dispatch_forms) == BATCH_SIZE:
-            frappe.enqueue(
-                "bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_delivered_pdf_and_fetch_pods_for_pf",
-                start=start + BATCH_SIZE,
-                queue="long",
-                timeout=3000,
-            )
+            frappe.db.commit()
+            time.sleep(0.1)
 
-    except Exception as e:
-        frappe.log_error("POD Batch Error", frappe.get_traceback())
+        # ---- Final Summary ----
+        has_more_records = api_calls_made >= API_CALL_LIMIT
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
 
+        summary = f"""
+        Pickup Forms POD Fetch Summary:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        Status: {status}
+        Total Processed: {total_processed}
+        Added: {len(added)}
+        Exists: {len(exists)}
+        Failed: {len(failed)}
+        Skipped: {len(skipped)}
+        API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+        Errors: {error_count}
+        Last Processed ID: {last_processed_id or "N/A"}
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
 
-def get_pod_image_for_pickup_dispatch_forms(pdf_name):
-    """Fetch POD file for a Dispatch Forms."""
-    try:
-        safe_name = "".join(
-            c for c in pdf_name if c.isalnum() or c in ("-", "_")
-        ).rstrip()
-        return frappe.db.get_value(
-            "File",
-            {
-                "attached_to_doctype": "Pickup Forms",
-                "attached_to_name": pdf_name,
-                "file_name": ["like", f"%{safe_name}_pod%"],
-            },
-            ["name", "file_url", "file_name"],
-            order_by="creation desc",
-        )
-    except Exception as e:
-        frappe.log_error(f"POD Fetch Error - {pdf_name}", str(e))
-        return None
+        if has_more_records:
+            frappe.log_error("Pickup Forms POD Sync Paused", summary)
+        elif error_count > 0:
+            frappe.log_error("Pickup Forms POD Completed with Errors", summary)
+        else:
+            frappe.log_error("Pickup Forms POD Completed Successfully", summary)
 
-
-def check_pod_status(pdf_name):
-    """Quick check for POD status of an Forms."""
-    try:
-        inv = frappe.db.get_value(
-            "Pickup Forms",
-            pdf_name,
-            ["eshipz_tracking_number", "eshipz_shipment_status"],
-            as_dict=True,
-        )
-
-        if not inv:
-            return {"status": "Pickup Forms not found"}
-
-        if inv.eshipz_shipment_status != "Delivered":
-            return {
-                "status": "Not Delivered",
-                "shipment_status": inv.eshipz_shipment_status,
-            }
-
-        pod = get_pod_image_for_pickup_dispatch_forms(pdf_name)
         return {
-            "status": "POD exists" if pod else "POD not found",
-            "file_name": pod.file_name if pod else None,
-            "file_url": pod.file_url if pod else None,
+            "status": "success",
+            "processed": total_processed,
+            "added": len(added),
+            "exists": len(exists),
+            "failed": len(failed),
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
         }
 
-    except Exception as e:
-        return {"status": "Error", "error": str(e)}
-
-
-def attach_file_from_url(doctype, docname, file_url, filename=None):
-    """
-    Download a file (image/pdf/zip/etc.) from URL and attach it to a Frappe document.
-    - ZIP → always {docname}.zip
-    - Non-ZIP → {safe_docname}_pod.{ext}
-    """
-    try:
-        # Fetch file data
-        response = requests.get(file_url, timeout=60)
-        if response.status_code != 200:
-            frappe.log_error(
-                f"Failed to download file from {file_url}. Status: {response.status_code}"
-            )
-            return None
-
-        content = response.content
-
-        # Detect extension from URL
-        parsed_url = urlparse(file_url)
-        url_filename = os.path.basename(parsed_url.path)
-        ext = os.path.splitext(url_filename)[1].lower().lstrip(".")
-
-        # 🔹 Handle ZIP files → always {docname}.zip
-        if ext == "zip":
-            clean_docname = "".join(
-                c for c in docname if c.isalnum() or c in ("-", "_")
-            ).replace(".", "")
-            filename = f"{clean_docname}.zip"
-        else:
-            # 🔹 Handle non-ZIP files → {safe_docname}_pod.{ext}
-            safe_docname = "".join(
-                c for c in docname if c.isalnum() or c in ("-", "_")
-            ).rstrip()
-            filename = filename or f"{safe_docname}_pod.{ext or 'bin'}"
-
-        # Check if already exists
-        existing_file = frappe.db.exists(
-            "File",
-            {
-                "attached_to_doctype": doctype,
-                "attached_to_name": docname,
-                "file_name": filename,
-            },
-        )
-        if existing_file:
-            frappe.log_error(f"File {filename} already exists for {doctype} {docname}")
-            return frappe.get_doc("File", existing_file)
-
-        # Save file
-        file_doc = save_file(
-            fname=filename,
-            content=content,
-            dt=doctype,
-            dn=docname,
-            folder="Home/Attachments",
-            is_private=1 if ext == "zip" else 0,
-        )
-        return file_doc
-
-    except requests.exceptions.RequestException as e:
-        frappe.log_error(f"Network error downloading file from {file_url}: {str(e)}")
-        return None
-    except Exception as e:
-        frappe.log_error(
-            f"Error attaching file from {file_url} to {doctype} {docname}: {str(e)}"
-        )
-        return None
+    except Exception:
+        frappe.log_error("Pickup Forms POD Batch Error", frappe.get_traceback())
+        raise

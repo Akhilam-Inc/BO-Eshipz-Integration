@@ -2,14 +2,25 @@ import frappe
 import requests
 import json
 from datetime import datetime
-from frappe.utils import add_days
+import time
 from frappe.utils.file_manager import save_file
-from frappe import _
+from frappe.utils import add_days, today
 import os
 from urllib.parse import urlparse
 
-BATCH_SIZE = 50
+# ============================================================================
+# CONFIGURATION CONSTANTS
+# ============================================================================
 
+BATCH_SIZE = 50
+API_CALL_LIMIT = 350  # API calls allowed
+RECORDS_PER_API_CALL = 50  # How many records sent in one API call
+RATE_LIMIT_BUFFER = 10  # Safety buffers
+
+
+# ============================================================================
+# CONFIGURATION & AUTHENTICATION
+# ============================================================================
 
 def get_eshipz_config():
     """
@@ -17,7 +28,7 @@ def get_eshipz_config():
     """
     config = frappe.get_single("BO Eshipz Configuration")
     if not config.is_enable or not config.get_password("api_token"):
-        frappe.throw("Please Enable Token In Eshipz Configuration Document!")
+        frappe.throw("Please Enable Token In BO Eshipz Configuration Document!")
     return config
 
 
@@ -29,6 +40,10 @@ def get_api_headers():
     token = config.get_password("api_token")
     return {"Content-Type": "application/json", "X-API-TOKEN": token}
 
+
+# ============================================================================
+# API CALL FUNCTIONS
+# ============================================================================
 
 def call_tracking_api_bulk(sales_invoices):
     """
@@ -81,459 +96,107 @@ def call_shipment_api_bulk(sales_invoices):
     return response.json()
 
 
-def call_pod_api(tracking_number):
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def map_tracking_by_reference(tracking_response):
     """
-    Make a POST request to the Proof of Delivery API using the awb Number.
+    Map tracking data using customer reference.
     """
-    headers = get_api_headers()
-    # Ensure Content-Type is set to application/json
-    headers["Content-Type"] = "application/json"
+    result = {}
 
-    pod_url = "https://app.eshipz.com/api/v1/getPOD"
+    for row in tracking_response:
+        reference = row.get("order_id") or row.get("customer_reference")
 
-    # Send JSON data instead of form data
-    payload = {"awb": tracking_number}
+        if reference:
+            result[reference] = row
 
-    response = requests.post(
-        pod_url,
-        data=json.dumps(payload),  # Convert to JSON string
-        headers=headers,
-    )
-
-    return response.json()
+    return result
 
 
-def schedule_next_batch(method_path, start):
+def update_delivery_dates_from_tracking(sales_invoice, shipment):
     """
-    Helper function to schedule the next batch job.
+    Update delivery dates on Sales Invoice from tracking payload.
+    Returns True if updated, else False.
     """
-    frappe.enqueue(method_path, start=start, queue="long", timeout=3000)
-
-
-# -------------------------------------------Update Eshipz Shipment Shipping Details -------------------------------------------
-
-
-@frappe.whitelist()
-def schedule_update_shipping_details_for_si(start=0):
     try:
-        sales_invoices = frappe.db.get_all(
+        update_values = {}
+
+        delivery_date_str = shipment.get("delivery_date")
+
+        if delivery_date_str:
+            delivery_date = datetime.strptime(
+                delivery_date_str, "%a, %d %b %Y %H:%M:%S %Z"
+            )
+            update_values.update(
+                {
+                    "custom_bo_actual_delivery_date": delivery_date.strftime("%Y-%m-%d"),
+                    "custom_bo_eshipz_shipment_status": "Delivered",
+                }
+            )
+
+        if update_values:
+            frappe.db.set_value(
+                "Sales Invoice",
+                sales_invoice,
+                update_values,
+                update_modified=False,
+            )
+            return True
+
+        return False
+
+    except Exception:
+        frappe.log_error(
+            title=f"Delivery Date Update Failed: {sales_invoice}",
+            message=frappe.get_traceback(),
+        )
+        return False
+
+
+def update_shipping_status_from_tracking(sales_invoice, shipment):
+    """
+    Update shipment status on Sales Invoice.
+    Returns True if updated, else False.
+    """
+    try:
+        tag_status = shipment.get("tag")
+
+        existing_status = frappe.db.get_value(
             "Sales Invoice",
-            filters={
-                "docstatus": 1,
-                "custom_is_eshipz_order_created_bo": 1,
-                "custom_bo_eshipz_tracking_number": ["in", [None, ""]],
-                "custom_bo_eshipz_shipment_status": [
-                    "in",
-                    [None, "", "Shipment Not Created"],
-                ],
-            },
-            fields=[
-                "name",
+            sales_invoice,
+            "custom_bo_eshipz_shipment_status",
+        )
+
+        # ✅ Normal update
+        if existing_status != "Delivered" and tag_status:
+            frappe.db.set_value(
+                "Sales Invoice",
+                sales_invoice,
                 "custom_bo_eshipz_shipment_status",
-                "custom_bo_eshipz_tracking_number",
-            ],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
-
-        if not sales_invoices:
-            frappe.log_error(
-                "Batch Processing Complete",
-                "No more Sales Invoice left to process.",
+                tag_status,
+                update_modified=False,
             )
-            return
+            return True
 
-        si_names = [si.name for si in sales_invoices]
-
-        # ✅ SINGLE BULK API CALLS
-        shipment_data = call_shipment_api_bulk(si_names)
-        tracking_data = call_tracking_api_bulk(si_names)
-
-        shipment_map = {
-            s.get("customer_referenc"): s
-            for s in shipment_data
-            if s.get("customer_referenc")
-        }
-
-        tracking_map = {t.get("q_num"): t for t in tracking_data if t.get("q_num")}
-
-        shipment_found = []
-        shipment_not_found = []
-
-        for si in sales_invoices:
-            si_name = si.name
-            existing_status = si.custom_bo_eshipz_shipment_status
-            existing_tracking = si.custom_bo_eshipz_tracking_number
-
-            shipment = shipment_map.get(si_name)
-            tracking = tracking_map.get(si_name)
-
-            if not shipment or not tracking:
-                frappe.db.set_value(
-                    "Sales Invoice",
-                    si_name,
-                    "custom_bo_eshipz_shipment_status",
-                    "Shipment Not Created",
-                )
-                shipment_not_found.append(si_name)
-                continue
-
-            vendor_name = shipment.get("vendor_name")
-            tracking_status = tracking.get("tag")
-            tracking_number = tracking.get("tracking_number")
-
-            if not existing_tracking and existing_status != "Delivered":
-                frappe.db.set_value(
-                    "Sales Invoice",
-                    si_name,
-                    {
-                        "custom_bo_eshipz_shipment_status": tracking_status,
-                        "custom_bo_eshipz_tracking_number": f"{tracking_number} - {vendor_name}",
-                    },
-                )
-                shipment_found.append(si_name)
-
-        frappe.log_error(
-            "Batch Processing Summary of Shipping Details",
-            f"Shipment Found For SI: {shipment_found} | Shipment Not Found For SI: {shipment_not_found}",
-        )
-
-        # 🔁 Next batch
-        if len(sales_invoices) == BATCH_SIZE:
-            schedule_next_batch(
-                "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_details_for_si",
-                start + BATCH_SIZE,
-            )
+        return False
 
     except Exception:
         frappe.log_error(
-            "Error in BO Sales Invoice Shipping Details Scheduler",
+            f"Shipment Status Update Failed: {sales_invoice}",
             frappe.get_traceback(),
         )
+        return False
 
 
-# ---------------------------------------------------Update Eshipz Shipment Actual Delivery Date-------------------------------------------------
-
-
-@frappe.whitelist()
-def schedule_update_delivery_date_for_si(start=0):
-    try:
-        sales_invoices = frappe.db.get_all(
-            "Sales Invoice",
-            filters={
-                "docstatus": 1,
-                "custom_custom_is_eshipz_order_created_bo_bo": 1,
-                "custom_bo_eshipz_shipment_status": ["not in", ["", "Shipment Not Created"]],
-                "custom_bo_eshipz_tracking_number": ["!=", ""],
-                "custom_bo_actual_delivery_date": ["is", "null"],
-            },
-            fields=["name"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
-
-        if not sales_invoices:
-            frappe.log_error(
-                "Batch Processing Complete",
-                "No more Sales Invoice left to process.",
-            )
-            return
-
-        si_names = [si.name for si in sales_invoices]
-
-        # ✅ SINGLE BULK TRACKING API CALL
-        tracking_data = call_tracking_api_bulk(si_names)
-
-        tracking_map = {
-            t.get("q_num"): t
-            for t in tracking_data
-            if t.get("q_num")
-        }
-
-        updated_invoices = []
-
-        for si in sales_invoices:
-            si_name = si.name
-            shipment = tracking_map.get(si_name)
-
-            if not shipment:
-                continue
-
-            delivery_date_str = shipment.get("delivery_date")
-
-            # ✅ Delivered
-            if delivery_date_str:
-                delivery_date = datetime.strptime(
-                    delivery_date_str, "%a, %d %b %Y %H:%M:%S %Z"
-                ).strftime("%Y-%m-%d")
-
-                frappe.db.set_value(
-                    "Sales Invoice",
-                    si_name,
-                    {
-                        "custom_bo_actual_delivery_date": delivery_date,
-                        "custom_bo_eshipz_shipment_status": "Delivered",
-                    },
-                )
-                updated_invoices.append(si_name)
-
-        if updated_invoices:
-            frappe.log_error(
-                "Updated Sales Invoice Delivery Date",
-                f"Successfully processed {len(updated_invoices)} invoices",
-            )
-
-        # 🔁 Next batch
-        if len(sales_invoices) == BATCH_SIZE:
-            schedule_next_batch(
-                "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_delivery_date_for_si",
-                start + BATCH_SIZE,
-            )
-
-    except Exception:
-        frappe.log_error(
-            "Error Updating Sales Invoice Delivery Date",
-            frappe.get_traceback(),
-        )
-
-# -------------------------------------------------Update Eshipz Shipment Status------------------------------------------------------
-
-
-@frappe.whitelist()
-def schedule_update_shipping_detail_status_for_si(start=0):
-    try:
-        sales_invoices = frappe.db.get_all(
-            "Sales Invoice",
-            filters={
-                "docstatus": 1,
-                "custom_is_eshipz_order_created_bo": 1,
-                "custom_bo_actual_delivery_date": ["is", "null"],
-                "custom_bo_eshipz_shipment_status": [
-                    "not in",
-                    ["Delivered", "Shipment Not Created"],
-                ],
-            },
-            fields=["name", "custom_bo_eshipz_shipment_status"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
-
-        if not sales_invoices:
-            frappe.log_error(
-                "Batch Processing Complete",
-                "No more Sales Invoice left to process.",
-            )
-            return
-
-        si_names = [si.name for si in sales_invoices]
-
-        # ✅ SINGLE BULK TRACKING API CALL
-        tracking_data = call_tracking_api_bulk(si_names)
-
-        tracking_map = {
-            t.get("q_num"): t
-            for t in tracking_data
-            if t.get("q_num")
-        }
-
-        updated_invoices = []
-
-        for si in sales_invoices:
-            si_name = si.name
-            existing_status = si.custom_bo_eshipz_shipment_status
-
-            shipment = tracking_map.get(si_name)
-            if not shipment:
-                continue
-
-            tag_status = shipment.get("tag")
-
-            if existing_status != "Delivered" and tag_status:
-                frappe.db.set_value(
-                    "Sales Invoice",
-                    si_name,
-                    "custom_bo_eshipz_shipment_status",
-                    tag_status,
-                )
-                updated_invoices.append(si_name)
-
-        if updated_invoices:
-            frappe.log_error(
-                "Updated Sales Invoice For Detail Status",
-                f"Successfully updated {len(updated_invoices)} invoices in this batch",
-            )
-
-        # 🔁 Next batch
-        if len(sales_invoices) == BATCH_SIZE:
-            schedule_next_batch(
-                "bo_eshipz_integration.bo_eshipz_integration.scheduler.schedule_update_shipping_detail_status_for_si",
-                start + BATCH_SIZE,
-            )
-
-    except Exception:
-        frappe.log_error(
-            "Error While Updating Shipment Status For Sales Invoice",
-            frappe.get_traceback(),
-        )
-
-
-# -------------------------------------------------Get Delivered Invoices and Fetch PODs------------------------------------------------------
-
-
-def get_delivered_pdf_and_fetch_pods_for_si(start=0):
-    BATCH_SIZE = 50
-
-    try:
-        # Get current fiscal year dates
-        from erpnext.accounts.utils import get_fiscal_year
-
-        fiscal_year, fiscal_start_date, fiscal_end_date = get_fiscal_year(
-            frappe.utils.today()
-        )
-
-        if not fiscal_year:
-            frappe.log_error(
-                "POD Processing Error", "No active fiscal year found for current date."
-            )
-            return
-
-        # Calculate date range: 30 days before fiscal year start to fiscal year end
-        filter_start_date = add_days(fiscal_start_date, -31)
-        filter_end_date = fiscal_end_date
-
-        pickup_dispatch_forms = frappe.db.get_all(
-            "Sales Invoice",
-            filters={
-                "docstatus": 1,
-                "custom_is_eshipz_order_created_bo": 1,
-                "custom_bo_eshipz_shipment_status": "Delivered",
-                "custom_bo_eshipz_tracking_number": ["!=", ""],
-                "posting_date": ["between", [filter_start_date, filter_end_date]],
-            },
-            fields=["name", "custom_bo_eshipz_tracking_number", "posting_date"],
-            order_by="creation desc",
-            limit=BATCH_SIZE,
-            start=start,
-        )
-
-        if not pickup_dispatch_forms:
-            frappe.log_error(
-                "POD Processing Complete",
-                "No more delivered pickup dispatch forms left in the specified date range.",
-            )
-            return
-
-        added, exists, failed, skipped = [], [], [], []
-
-        for pdf in pickup_dispatch_forms:
-            name = pdf.name
-            tracking_no = (pdf.custom_bo_eshipz_tracking_number or "").split(" - ")[0]
-
-            if not tracking_no:
-                skipped.append(name)
-                continue
-
-            if get_pod_image_for_pickup_dispatch_forms(name):
-                exists.append(name)
-                continue
-
-            try:
-                pod = call_pod_api(tracking_no)
-                url = pod.get("data", {}).get("url")
-
-                if url:
-                    doc = attach_file_from_url("Sales Invoice", name, url)
-                    if doc:
-                        added.append(name)
-                    else:
-                        failed.append(name)
-                else:
-                    failed.append(name)
-            except Exception as e:
-                failed.append(name)
-                frappe.log_error(f"POD Error - {name}", str(e))
-
-        # Summary log with Forms names instead of counts
-        frappe.log_error(
-            "POD Summary For Sales Invoice",
-            f"Start={start} | Date Range: {filter_start_date} to {filter_end_date} | Added={added} | Exists={exists} | Failed={failed} | Skipped={skipped}",
-        )
-
-        # Enqueue next batch
-        if len(pickup_dispatch_forms) == BATCH_SIZE:
-            frappe.enqueue(
-                "bo_eshipz_integration.bo_eshipz_integration.scheduler.get_delivered_pdf_and_fetch_pods_for_si",
-                start=start + BATCH_SIZE,
-                queue="long",
-                timeout=3000,
-            )
-
-    except Exception as e:
-        frappe.log_error("POD Batch Error", frappe.get_traceback())
-
-
-def get_pod_image_for_pickup_dispatch_forms(pdf_name):
-    """Fetch POD file for a Dispatch Forms."""
-    try:
-        safe_name = "".join(
-            c for c in pdf_name if c.isalnum() or c in ("-", "_")
-        ).rstrip()
-        return frappe.db.get_value(
-            "File",
-            {
-                "attached_to_doctype": "Sales Invoice",
-                "attached_to_name": pdf_name,
-                "file_name": ["like", f"%{safe_name}_pod%"],
-            },
-            ["name", "file_url", "file_name"],
-            order_by="creation desc",
-        )
-    except Exception as e:
-        frappe.log_error(f"POD Fetch Error - {pdf_name}", str(e))
-        return None
-
-
-def check_pod_status(pdf_name):
-    """Quick check for POD status of an Forms."""
-    try:
-        inv = frappe.db.get_value(
-            "Sales Invoice",
-            pdf_name,
-            ["custom_bo_eshipz_tracking_number", "custom_bo_eshipz_shipment_status"],
-            as_dict=True,
-        )
-
-        if not inv:
-            return {"status": "Sales Invoice not found"}
-
-        if inv.custom_bo_eshipz_shipment_status != "Delivered":
-            return {
-                "status": "Not Delivered",
-                "shipment_status": inv.custom_bo_eshipz_shipment_status,
-            }
-
-        pod = get_pod_image_for_pickup_dispatch_forms(pdf_name)
-        return {
-            "status": "POD exists" if pod else "POD not found",
-            "file_name": pod.file_name if pod else None,
-            "file_url": pod.file_url if pod else None,
-        }
-
-    except Exception as e:
-        return {"status": "Error", "error": str(e)}
-
-
-def attach_file_from_url(doctype, docname, file_url, filename=None):
+def attach_file_from_url(doctype, docname, file_url, safe_name=None):
     """
     Download a file (image/pdf/zip/etc.) from URL and attach it to a Frappe document.
     - ZIP → always {docname}.zip
     - Non-ZIP → {safe_docname}_pod.{ext}
     """
     try:
-        # Fetch file data
         response = requests.get(file_url, timeout=60)
         if response.status_code != 200:
             frappe.log_error(
@@ -542,8 +205,6 @@ def attach_file_from_url(doctype, docname, file_url, filename=None):
             return None
 
         content = response.content
-
-        # Detect extension from URL
         parsed_url = urlparse(file_url)
         url_filename = os.path.basename(parsed_url.path)
         ext = os.path.splitext(url_filename)[1].lower().lstrip(".")
@@ -554,14 +215,17 @@ def attach_file_from_url(doctype, docname, file_url, filename=None):
                 c for c in docname if c.isalnum() or c in ("-", "_")
             ).replace(".", "")
             filename = f"{clean_docname}.zip"
+            is_private = 1
         else:
             # 🔹 Handle non-ZIP files → {safe_docname}_pod.{ext}
-            safe_docname = "".join(
-                c for c in docname if c.isalnum() or c in ("-", "_")
-            ).rstrip()
-            filename = filename or f"{safe_docname}_pod.{ext or 'bin'}"
+            safe_docname = (
+                safe_name
+                or "".join(c for c in docname if c.isalnum() or c in ("-", "_")).rstrip()
+            )
+            filename = f"{safe_docname}_pod.{ext or 'bin'}"
+            is_private = 0
 
-        # Check if already exists
+        # Check if file already exists
         existing_file = frappe.db.exists(
             "File",
             {
@@ -571,7 +235,6 @@ def attach_file_from_url(doctype, docname, file_url, filename=None):
             },
         )
         if existing_file:
-            frappe.log_error(f"File {filename} already exists for {doctype} {docname}")
             return frappe.get_doc("File", existing_file)
 
         # Save file
@@ -581,7 +244,7 @@ def attach_file_from_url(doctype, docname, file_url, filename=None):
             dt=doctype,
             dn=docname,
             folder="Home/Attachments",
-            is_private=1 if ext == "zip" else 0,
+            is_private=is_private,
         )
         return file_doc
 
@@ -593,3 +256,700 @@ def attach_file_from_url(doctype, docname, file_url, filename=None):
             f"Error attaching file from {file_url} to {doctype} {docname}: {str(e)}"
         )
         return None
+
+
+# ============================================================================
+# MAIN SCHEDULER FUNCTIONS
+# ============================================================================
+
+# -------------------------------------------Update Eshipz Shipment Shipping Details -------------------------------------------
+
+
+@frappe.whitelist()
+def schedule_update_shipping_details_for_si():
+    """
+    Updates shipping details for Sales Invoices respecting API rate limits.
+    Makes 2 API calls per batch (shipment + tracking).
+    """
+
+    try:
+        total_processed = 0
+        shipment_found = []
+        shipment_not_found = []
+        api_calls_made = 0
+        error_count = 0
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(
+            f"Starting Sales Invoice shipping details sync at {datetime.now()}"
+        )
+
+        # Reserve space for 2 API calls per batch
+        while api_calls_made < API_CALL_LIMIT - 1:
+            iteration += 1
+
+            filters = {
+                "docstatus": 1,
+                "custom_is_eshipz_order_created_bo": 1,
+                "is_return": 0,
+                "custom_bo_eshipz_tracking_number": ["in", [None, ""]],
+                "custom_bo_eshipz_shipment_status": [
+                    "in",
+                    [None, "", "Shipment Not Created"],
+                ],
+            }
+
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            sales_invoices = frappe.db.get_all(
+                "Sales Invoice",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
+            )
+
+            if not sales_invoices:
+                frappe.logger().info("No more Sales Invoices to process")
+                break
+
+            invoice_names = [si.name for si in sales_invoices]
+            last_processed_id = invoice_names[-1]
+
+            try:
+                # --- API Call 1: Shipment ---
+                shipment_data = call_shipment_api_bulk(invoice_names)
+                api_calls_made += 1
+
+                # --- API Call 2: Tracking ---
+                tracking_data = call_tracking_api_bulk(invoice_names)
+                api_calls_made += 1
+
+                frappe.logger().info(
+                    f"API Calls {api_calls_made}/{API_CALL_LIMIT} | "
+                    f"Batch {iteration} | Records {len(invoice_names)}"
+                )
+
+                shipment_map = {
+                    d.get("customer_referenc"): d
+                    for d in shipment_data or []
+                    if d.get("customer_referenc")
+                }
+
+                tracking_map = {
+                    d.get("order_id"): d
+                    for d in tracking_data or []
+                    if d.get("order_id")
+                }
+
+                for invoice_name in invoice_names:
+                    try:
+                        shipment = shipment_map.get(invoice_name)
+                        tracking = tracking_map.get(invoice_name)
+
+                        if shipment and tracking:
+                            vendor_name = shipment.get("vendor_name")
+                            tracking_status = tracking.get("tag")
+                            tracking_number = tracking.get("tracking_number")
+
+                            combined_value = f"{tracking_number} - {vendor_name}"
+
+                            existing_status, existing_tracking = frappe.db.get_value(
+                                "Sales Invoice",
+                                invoice_name,
+                                [
+                                    "custom_bo_eshipz_shipment_status",
+                                    "custom_bo_eshipz_tracking_number",
+                                ],
+                            )
+
+                            if not existing_tracking and existing_status != "Delivered":
+                                frappe.db.set_value(
+                                    "Sales Invoice",
+                                    invoice_name,
+                                    {
+                                        "custom_bo_eshipz_shipment_status": tracking_status,
+                                        "custom_bo_eshipz_tracking_number": combined_value,
+                                    },
+                                    update_modified=False,
+                                )
+
+                            shipment_found.append(invoice_name)
+
+                        else:
+                            frappe.db.set_value(
+                                "Sales Invoice",
+                                invoice_name,
+                                "custom_bo_eshipz_shipment_status",
+                                "Shipment Not Created",
+                                update_modified=False,
+                            )
+                            shipment_not_found.append(invoice_name)
+
+                        total_processed += 1
+
+                    except Exception:
+                        error_count += 1
+                        frappe.log_error(
+                            f"Error processing Sales Invoice {invoice_name}",
+                            frappe.get_traceback(),
+                        )
+                        continue
+
+                frappe.db.commit()
+                time.sleep(0.1)
+
+            except Exception as api_error:
+                api_calls_made += 2
+                error_count += 1
+                frappe.log_error(
+                    f"API Error - Sales Invoice Batch {iteration}",
+                    f"Batch starting at {invoice_names[0]}\nError: {str(api_error)}",
+                )
+                continue
+
+            if api_calls_made >= API_CALL_LIMIT - 1:
+                frappe.logger().warning(
+                    f"Reached API call limit ({api_calls_made}/{API_CALL_LIMIT}). "
+                    f"Stopping gracefully."
+                )
+                break
+
+        # ---- Final Summary ----
+        has_more_records = api_calls_made >= API_CALL_LIMIT - 1
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
+
+        summary = f"""
+            Sales Invoice Shipping Sync Summary:
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            Status: {status}
+            Total Processed: {total_processed}
+            Shipment Found: {len(shipment_found)}
+            Shipment Not Found: {len(shipment_not_found)}
+            API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+            Errors: {error_count}
+            Last Processed ID: {last_processed_id or "N/A"}
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+
+        if has_more_records:
+            frappe.log_error("SI Shipping Sync Paused - API Limit Reached", summary)
+        elif error_count > 0:
+            frappe.log_error("SI Shipping Sync Completed with Errors", summary)
+        else:
+            frappe.log_error("SI Shipping Sync Completed Successfully", summary)
+
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "found": len(shipment_found),
+            "not_found": len(shipment_not_found),
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
+        }
+
+    except Exception:
+        frappe.log_error(
+            "Error in Sales Invoice Shipping Batch Processing",
+            frappe.get_traceback(),
+        )
+        raise
+
+
+# ---------------------------------------------------Update Eshipz Shipment Actual Delivery Date-------------------------------------------------
+
+
+@frappe.whitelist()
+def schedule_update_delivery_date_for_si():
+    """
+    Updates actual / expected delivery dates for Sales Invoices
+    respecting API rate limits.
+    Uses cursor-based batching to avoid skipping records.
+    """
+
+    try:
+        total_processed = 0
+        updated_invoices = []
+        skipped_invoices = []
+        api_calls_made = 0
+        error_count = 0
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(f"Starting SI delivery date sync at {datetime.now()}")
+
+        while api_calls_made < API_CALL_LIMIT:
+            iteration += 1
+
+            filters = {
+                "docstatus": 1,
+                "custom_custom_is_eshipz_order_created_bo_bo": 1,
+                "is_return": 0,
+                "custom_bo_eshipz_tracking_number": ["!=", ""],
+                "custom_bo_actual_delivery_date": ["in", ["", None]],
+                "custom_bo_eshipz_shipment_status": [
+                    "not in",
+                    ["", "Shipment Not Created"],
+                ],
+            }
+
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            sales_invoices = frappe.db.get_all(
+                "Sales Invoice",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
+            )
+
+            if not sales_invoices:
+                frappe.logger().info("No more Sales Invoices to process")
+                break
+
+            invoice_names = [row.name for row in sales_invoices]
+            last_processed_id = invoice_names[-1]
+
+            try:
+                # ---- API Call (Tracking only) ----
+                tracking_response = call_tracking_api_bulk(invoice_names)
+                api_calls_made += 1
+
+                frappe.logger().info(
+                    f"API Calls {api_calls_made}/{API_CALL_LIMIT} | "
+                    f"Batch {iteration} | Records {len(invoice_names)}"
+                )
+
+                if not tracking_response:
+                    skipped_invoices.extend(invoice_names)
+                    total_processed += len(invoice_names)
+                    continue
+
+                tracking_map = map_tracking_by_reference(tracking_response)
+
+                for invoice_name in invoice_names:
+                    try:
+                        shipment = tracking_map.get(invoice_name)
+
+                        if shipment:
+                            updated = update_delivery_dates_from_tracking(
+                                invoice_name, shipment
+                            )
+                            if updated:
+                                updated_invoices.append(invoice_name)
+                            else:
+                                skipped_invoices.append(invoice_name)
+                        else:
+                            skipped_invoices.append(invoice_name)
+
+                        total_processed += 1
+
+                    except Exception:
+                        error_count += 1
+                        frappe.log_error(
+                            f"Delivery Date Record Error: {invoice_name}",
+                            frappe.get_traceback(),
+                        )
+                        continue
+
+                frappe.db.commit()
+                time.sleep(0.1)
+
+            except Exception as api_error:
+                api_calls_made += 1
+                error_count += 1
+                frappe.log_error(
+                    f"Delivery Date API Error - Batch {iteration}",
+                    f"Batch starting at {invoice_names[0]}\n{str(api_error)}",
+                )
+                continue
+
+            if api_calls_made >= API_CALL_LIMIT:
+                frappe.logger().warning(
+                    f"Reached API call limit ({api_calls_made}/{API_CALL_LIMIT}). "
+                    f"Stopping gracefully."
+                )
+                break
+
+        # ---- Final Summary ----
+        has_more_records = api_calls_made >= API_CALL_LIMIT
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
+
+        summary = f"""
+            Sales Invoice Delivery Date Sync Summary:
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            Status: {status}
+            Total Processed: {total_processed}
+            Updated: {len(updated_invoices)}
+            Skipped: {len(skipped_invoices)}
+            API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+            Errors: {error_count}
+            Last Processed ID: {last_processed_id or "N/A"}
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+
+        if has_more_records:
+            frappe.log_error("SI Delivery Date Sync Paused", summary)
+        elif error_count > 0:
+            frappe.log_error("SI Delivery Date Sync Completed with Errors", summary)
+        else:
+            frappe.log_error("SI Delivery Date Sync Completed Successfully", summary)
+
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "updated": len(updated_invoices),
+            "skipped": len(skipped_invoices),
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
+        }
+
+    except Exception:
+        frappe.log_error(
+            "Error in Sales Invoice Delivery Date Batch Processing",
+            frappe.get_traceback(),
+        )
+        raise
+
+
+# -------------------------------------------------Update Eshipz Shipment Status------------------------------------------------------
+
+
+@frappe.whitelist()
+def schedule_update_shipping_detail_status_for_si():
+    """
+    Updates shipping status for Sales Invoices respecting API rate limits.
+    Uses cursor-based batching to avoid skipping records.
+    """
+
+    try:
+        total_processed = 0
+        updated_invoices = []
+        skipped_invoices = []
+        api_calls_made = 0
+        error_count = 0
+        last_processed_id = None
+        iteration = 0
+
+        frappe.logger().info(f"Starting SI shipping status sync at {datetime.now()}")
+
+        while api_calls_made < API_CALL_LIMIT:
+            iteration += 1
+
+            filters = {
+                "docstatus": 1,
+                "is_return": 0,
+                "custom_is_eshipz_order_created_bo": 1,
+                "custom_bo_actual_delivery_date": ["is", "null"],
+                "custom_bo_eshipz_shipment_status": [
+                    "not in",
+                    ["Delivered", "Shipment Not Created"],
+                ],
+            }
+
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            sales_invoices = frappe.db.get_all(
+                "Sales Invoice",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
+            )
+
+            if not sales_invoices:
+                frappe.logger().info("No more Sales Invoices to process")
+                break
+
+            invoice_names = [row.name for row in sales_invoices]
+            last_processed_id = invoice_names[-1]
+
+            try:
+                # ---- API Call (Tracking only) ----
+                tracking_response = call_tracking_api_bulk(invoice_names)
+                api_calls_made += 1
+
+                frappe.logger().info(
+                    f"API Calls {api_calls_made}/{API_CALL_LIMIT} | "
+                    f"Batch {iteration} | Records {len(invoice_names)}"
+                )
+
+                if not tracking_response:
+                    skipped_invoices.extend(invoice_names)
+                    total_processed += len(invoice_names)
+                    continue
+
+                tracking_map = map_tracking_by_reference(tracking_response)
+
+                for invoice_name in invoice_names:
+                    try:
+                        shipment = tracking_map.get(invoice_name)
+
+                        if shipment:
+                            updated = update_shipping_status_from_tracking(
+                                invoice_name, shipment
+                            )
+                            if updated:
+                                updated_invoices.append(invoice_name)
+                            else:
+                                skipped_invoices.append(invoice_name)
+                        else:
+                            skipped_invoices.append(invoice_name)
+
+                        total_processed += 1
+
+                    except Exception:
+                        error_count += 1
+                        frappe.log_error(
+                            f"Shipping Status Record Error: {invoice_name}",
+                            frappe.get_traceback(),
+                        )
+                        continue
+
+                frappe.db.commit()
+                time.sleep(0.1)
+
+            except Exception as api_error:
+                api_calls_made += 1
+                error_count += 1
+                frappe.log_error(
+                    f"Shipping Status API Error - Batch {iteration}",
+                    f"Batch starting at {invoice_names[0]}\n{str(api_error)}",
+                )
+                continue
+
+            if api_calls_made >= API_CALL_LIMIT:
+                frappe.logger().warning(
+                    f"Reached API call limit ({api_calls_made}/{API_CALL_LIMIT}). "
+                    f"Stopping gracefully."
+                )
+                break
+
+        # ---- Final Summary ----
+        has_more_records = api_calls_made >= API_CALL_LIMIT
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
+
+        summary = f"""
+            Sales Invoice Shipping Status Sync Summary:
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            Status: {status}
+            Total Processed: {total_processed}
+            Updated: {len(updated_invoices)}
+            Skipped: {len(skipped_invoices)}
+            API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+            Errors: {error_count}
+            Last Processed ID: {last_processed_id or "N/A"}
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+
+        if has_more_records:
+            frappe.log_error("SI Shipping Status Sync Paused", summary)
+        elif error_count > 0:
+            frappe.log_error("SI Shipping Status Sync Completed with Errors", summary)
+        else:
+            frappe.log_error("SI Shipping Status Sync Completed Successfully", summary)
+
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "updated": len(updated_invoices),
+            "skipped": len(skipped_invoices),
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
+        }
+
+    except Exception:
+        frappe.log_error(
+            "Error in Sales Invoice Shipping Status Batch Processing",
+            frappe.get_traceback(),
+        )
+        raise
+
+
+# -------------------------------------------------Get Delivered Invoices and Fetch PODs------------------------------------------------------
+
+@frappe.whitelist()
+def get_delivered_invoices_and_fetch_pods():
+    """
+    Fetch PODs for delivered Sales Invoices using BULK shipment API.
+    Cursor-based batching + API limit safe.
+    """
+
+    try:
+        from erpnext.accounts.utils import get_fiscal_year
+
+        total_processed = 0
+        added, failed, skipped = [], [], []
+        api_calls_made = 0
+        error_count = 0
+        last_processed_id = None
+        iteration = 0
+
+        # ---- Fiscal Year Range ----
+        fiscal_year, fiscal_start_date, fiscal_end_date = get_fiscal_year(today())
+        if not fiscal_year:
+            frappe.log_error("POD Processing Error", "No active fiscal year found.")
+            return
+
+        filter_start_date = add_days(fiscal_start_date, -31)
+        filter_end_date = fiscal_end_date
+
+        frappe.logger().info(
+            f"POD Sync started at {datetime.now()} | "
+            f"Range: {filter_start_date} → {filter_end_date}"
+        )
+
+        def safe_docname(name):
+            return "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip()
+
+        while api_calls_made < API_CALL_LIMIT:
+            iteration += 1
+
+            # ---- Invoice Filters ----
+            filters = {
+                "docstatus": 1,
+                "custom_is_eshipz_order_created_bo": 1,
+                "is_return": 0,
+                "custom_bo_eshipz_shipment_status": "Delivered",
+                "custom_bo_eshipz_tracking_number": ["!=", ""],
+                "posting_date": ["between", [filter_start_date, filter_end_date]],
+            }
+
+            if last_processed_id:
+                filters["name"] = [">", last_processed_id]
+
+            invoices = frappe.db.get_all(
+                "Sales Invoice",
+                filters=filters,
+                fields=["name"],
+                order_by="name asc",
+                limit=BATCH_SIZE,
+            )
+
+            if not invoices:
+                frappe.logger().info("No more delivered invoices to process")
+                break
+
+            invoice_names = [inv.name for inv in invoices]
+            last_processed_id = invoice_names[-1]
+
+            # ---- Existing POD check (bulk) ----
+            existing_files = frappe.db.get_all(
+                "File",
+                filters={
+                    "attached_to_doctype": "Sales Invoice",
+                    "attached_to_name": ["in", invoice_names],
+                    "file_name": ["like", "%pod%"],
+                },
+                fields=["attached_to_name"],
+            )
+            existing_pod_map = {f.attached_to_name for f in existing_files}
+
+            frappe.logger().info(
+                f"Batch {iteration} | Records {len(invoice_names)} | "
+                f"API Calls {api_calls_made}/{API_CALL_LIMIT}"
+            )
+
+            # ---- BULK Shipment API Call ----
+            shipment_data = call_shipment_api_bulk(invoice_names)
+            api_calls_made += 1
+
+            if not shipment_data:
+                failed.extend(invoice_names)
+                total_processed += len(invoice_names)
+                continue
+
+            # ---- Build POD Map: Invoice → POD URL ----
+            pod_map = {
+                s.get("customer_referenc"): s.get("pod_link")
+                for s in shipment_data
+                if s.get("customer_referenc") and s.get("pod_link")
+            }
+
+            # ---- Attach PODs ----
+            for name in invoice_names:
+
+                if name in existing_pod_map:
+                    skipped.append(name)
+                    total_processed += 1
+                    continue
+
+                pod_url = pod_map.get(name)
+                if not pod_url:
+                    failed.append(name)
+                    total_processed += 1
+                    continue
+
+                try:
+                    file_doc = attach_file_from_url(
+                        "Sales Invoice",
+                        name,
+                        pod_url,
+                        safe_name=safe_docname(name),
+                    )
+
+                    if file_doc:
+                        added.append(name)
+                    else:
+                        failed.append(name)
+
+                except Exception:
+                    failed.append(name)
+                    error_count += 1
+                    frappe.log_error(
+                        f"POD Attach Error - {name}",
+                        frappe.get_traceback(),
+                    )
+
+                total_processed += 1
+
+            frappe.db.commit()
+            time.sleep(0.1)
+
+        # ---- Final Summary ----
+        has_more_records = api_calls_made >= API_CALL_LIMIT
+        status = "PAUSED - More records pending" if has_more_records else "COMPLETED"
+
+        summary = f"""
+        POD Fetch Summary:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        Status: {status}
+        Date Range: {filter_start_date} → {filter_end_date}
+        Total Processed: {total_processed}
+        Added: {len(added)}
+        Failed: {len(failed)}
+        Skipped: {len(skipped)}
+        API Calls Made: {api_calls_made}/{API_CALL_LIMIT}
+        Errors: {error_count}
+        Last Processed ID: {last_processed_id or "N/A"}
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        """
+
+        if has_more_records:
+            frappe.log_error("POD Sync Paused - API Limit Reached", summary)
+        elif error_count > 0:
+            frappe.log_error("POD Sync Completed with Errors", summary)
+        else:
+            frappe.log_error("POD Sync Completed Successfully", summary)
+
+        return {
+            "status": "success",
+            "processed": total_processed,
+            "added": len(added),
+            "failed": len(failed),
+            "skipped": len(skipped),
+            "api_calls": api_calls_made,
+            "errors": error_count,
+            "has_more": has_more_records,
+        }
+
+    except Exception:
+        frappe.log_error("POD Batch Error", frappe.get_traceback())
+        raise

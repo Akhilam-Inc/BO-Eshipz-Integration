@@ -24,40 +24,6 @@ frappe.ui.form.on("Pickup Forms", {
 			);
 		}
 
-		if (frm.doc.docstatus === 1) {
-			frm.add_custom_button(
-				__("Fetch Shipment Status"),
-				function () {
-					frappe.call({
-						method:
-							"bo_eshipz_integration.bo_eshipz_integration.pickup_scheduler.get_shipping_details_status",
-						args: {
-							pdf_name: frm.doc.name,
-						},
-						freeze: true,
-						callback: function (r) {
-							if (
-								r.message === true ||
-								(Array.isArray(r.message) && r.message[0] === true)
-							) {
-								frappe.show_alert({
-									message: __("Shipment status updated successfully"),
-									indicator: "green",
-								});
-								frm.reload_doc();
-							} else {
-								frappe.show_alert({
-									message: __("No shipment status change"),
-									indicator: "orange",
-								});
-							}
-						},
-					});
-				},
-				__("Eshipz Actions")
-			);
-		}
-
 		frm.set_query("customer_address", () => {
 			return {
 				filters: {
