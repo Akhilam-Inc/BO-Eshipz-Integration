@@ -89,7 +89,7 @@ def create_dn_with_so(sales_dict, pick_list):
 		for so in sales_dict[customer]:
 			delivery_note = None
 			kwargs = {"skip_item_mapping": True}
-			delivery_note = create_delivery_note_from_sales_order(so, delivery_note, skip_item_mapping=True)
+			delivery_note = create_delivery_note_from_sales_order(so, delivery_note,  kwargs=kwargs)
 			
 			break
 		if delivery_note:
@@ -180,6 +180,7 @@ def consolidated_item_data(pick_list, delivery_note):
 			grouped_dict['price_list_rate'] = sales_order_data.price_list_rate or 0
 			grouped_dict['rate'] = sales_order_data.rate or 0
 			grouped_dict['pricing_rules'] = sales_order_data.pricing_rules or ""
+			grouped_dict['against_pick_list'] = pick_list.name
 		else:
 			grouped_dict['discount_percentage'] = 0
 			grouped_dict['discount_amount'] = 0
