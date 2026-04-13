@@ -144,7 +144,8 @@ doctype_js = {
 doc_events = {
     "Delivery Note": {
         "before_submit":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.before_submit",
-        "validate":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.validate"
+        "validate":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.validate",
+        "on_submit":"bo_eshipz_integration.bo_eshipz_integration.override.delivery_note.on_submit"
     },
     "Sales Invoice":{
         "on_submit":"bo_eshipz_integration.bo_eshipz_integration.override.sales_invoice.on_submit"

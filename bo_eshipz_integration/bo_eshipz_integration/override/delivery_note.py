@@ -15,6 +15,18 @@ def before_submit(self,method):
             if item.qty and not item.box_type:
                 frappe.throw(f"Row <strong>{idx}</strong> has a package value <strong>{item.qty}</strong> but no box type specified. Please correct this before submitting.")
 
+def on_submit(self, method):
+    """Update Pick List status when Delivery Note is submitted."""
+
+    # Get unique pick list names
+    pick_lists = {item.against_pick_list for item in self.items if item.against_pick_list}
+
+    for pick_list in pick_lists:
+        pl = frappe.get_doc("Pick List", pick_list)
+
+        # Pick List is submitted (docstatus = 1)
+        # Use db_set → directly updates DB
+        pl.db_set("status", "Completed")
 
 # Eshipz Order Creation
 @frappe.whitelist()
