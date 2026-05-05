@@ -10,7 +10,7 @@ from collections import defaultdict
 
 class PickupForms(Document):
 	def on_submit(self):
-		if not self.is_eshipz_order_created:
+		if not self.is_eshipz_order_created and not self.not_required_for_eshipz:
 			create_eshipz_order(self)
 
 

@@ -4,7 +4,7 @@
 frappe.ui.form.on("Pickup Forms", {
 	refresh(frm) {
 		// 🟢 Create Eshipz Order (ONLY when not created)
-		if (frm.doc.docstatus === 1 && !frm.doc.is_eshipz_order_created) {
+		if (frm.doc.docstatus === 1 && !frm.doc.is_eshipz_order_created && !frm.doc.not_required_for_eshipz) {
 			frm.add_custom_button(
 				__("Create Eshipz Order"),
 				function () {

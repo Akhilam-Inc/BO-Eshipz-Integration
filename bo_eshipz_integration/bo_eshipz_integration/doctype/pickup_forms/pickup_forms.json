@@ -25,12 +25,15 @@
   "actual_pickup_date",
   "order_amount",
   "total_weight",
+  "complain_form_ref",
   "receiver_and_vendor_information_section",
   "receiver_name",
   "receiver_address",
   "receiver_address_display",
   "column_break_yzup",
+  "not_required_for_eshipz",
   "vendor_description",
+  "carrier_docket_no",
   "slug",
   "vendor_id",
   "service_type",
@@ -136,6 +139,7 @@
   },
   {
    "allow_on_submit": 1,
+   "depends_on": "eval:doc.not_required_for_eshipz == 0",
    "fetch_from": "vendor_description.vendor_slug",
    "fetch_if_empty": 1,
    "fieldname": "slug",
@@ -144,6 +148,7 @@
   },
   {
    "allow_on_submit": 1,
+   "depends_on": "eval:doc.not_required_for_eshipz == 0",
    "fetch_from": "vendor_description.vendor_id",
    "fetch_if_empty": 1,
    "fieldname": "vendor_id",
@@ -162,6 +167,7 @@
    "reqd": 1
   },
   {
+   "depends_on": "eval:doc.not_required_for_eshipz == 0",
    "fieldname": "eshipz_details_tab",
    "fieldtype": "Tab Break",
    "label": "Eshipz Details"
@@ -250,6 +256,7 @@
    "options": "Phone"
   },
   {
+   "depends_on": "eval:doc.not_required_for_eshipz == 0",
    "fetch_from": "vendor_description.service_type",
    "fetch_if_empty": 1,
    "fieldname": "service_type",
@@ -260,17 +267,37 @@
    "fieldname": "pincode",
    "fieldtype": "Data",
    "label": "Postal Code"
+  },
+  {
+   "fieldname": "complain_form_ref",
+   "fieldtype": "Link",
+   "label": "Complain Form Ref",
+   "options": "Complain form",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "not_required_for_eshipz",
+   "fieldtype": "Check",
+   "label": "Not Required For Eshipz"
+  },
+  {
+   "depends_on": "eval:doc.not_required_for_eshipz == 1",
+   "fieldname": "carrier_docket_no",
+   "fieldtype": "Data",
+   "label": "Carrier Docket no",
+   "mandatory_depends_on": "eval:doc.not_required_for_eshipz == 1"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-01-28 18:35:01.582583",
+ "modified": "2026-04-20 15:11:51.195631",
  "modified_by": "Administrator",
  "module": "Bo Eshipz Integration",
  "name": "Pickup Forms",
- "naming_rule": "Expression (old style)",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
@@ -288,6 +315,7 @@
   }
  ],
  "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []
