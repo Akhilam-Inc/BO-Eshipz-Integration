@@ -37,7 +37,8 @@ frappe.ui.form.on("Pickup Forms", {
 			return {
 				filters: {
 					link_doctype: "Company",
-					link_name: frm.doc.receiver_address,
+					link_name: frm.doc.receiver_name,
+					address_type: "Shipping",
 				},
 			};
 		});

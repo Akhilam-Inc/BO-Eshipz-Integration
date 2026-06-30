@@ -38,7 +38,7 @@ frappe.ui.form.on("Dispatch and Transfer Form", {
 			return {
 				filters: {
 					'link_doctype':'Company',
-					'link_name': frm.doc.sender_address
+					'link_name': frm.doc.sender_name
 				}
 			}
 		})
