@@ -68,6 +68,13 @@ def create_eshipz_order(doc):
 			"parcel_contents": "Pets Grooming Products",
 			"is_document": "false",
 			"service_type": doc.get("service_type"),
+			"gst_invoices": [
+				{
+					"invoice_number": doc.get('name'),
+					"invoice_date": formatted_date,
+					"invoice_value": float(doc.get("order_amount") or 0.0)
+				}
+			],
 			"charged_weight": {
 				"unit": "KG",
 				"value": doc.get("total_weight")
