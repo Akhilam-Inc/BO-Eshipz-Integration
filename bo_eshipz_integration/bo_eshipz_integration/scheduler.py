@@ -45,6 +45,24 @@ def get_api_headers():
 # API CALL FUNCTIONS
 # ============================================================================
 
+def extract_api_error(response):
+    """
+    Build a user-centric error string from an Eshipz API error response.
+    Prefers meta.details[], falls back to meta.message, then raw text.
+    """
+    try:
+        resp_json = response.json()
+        meta = resp_json.get("meta", {})
+        details = meta.get("details") or []
+        if details:
+            return ", ".join(details)
+        if meta.get("message"):
+            return meta.get("message")
+    except (ValueError, AttributeError):
+        pass
+    return response.text
+
+
 def call_tracking_api_bulk(sales_invoices):
     """
     Bulk Tracking API call using comma-separated q_num (as required by Eshipz).
@@ -64,7 +82,14 @@ def call_tracking_api_bulk(sales_invoices):
     response = requests.post(tracking_url, headers=headers, data=payload, timeout=30)
 
     if response.status_code != 200:
-        frappe.log_error(title="Eshipz Bulk Tracking API Error", message=response.text)
+        frappe.log_error(
+            title="Eshipz Bulk Tracking API Error",
+            message=(
+                f"Status: {response.status_code}\n"
+                f"Details: {extract_api_error(response)}\n"
+                f"References: {q_num_value}"
+            ),
+        )
         return []
 
     return response.json()
@@ -90,7 +115,14 @@ def call_shipment_api_bulk(sales_invoices):
     response = requests.get(shipment_url, headers=headers, timeout=30)
 
     if response.status_code != 200:
-        frappe.log_error("Eshipz Bulk Shipment API Error", response.text)
+        frappe.log_error(
+            title="Eshipz Bulk Shipment API Error",
+            message=(
+                f"Status: {response.status_code}\n"
+                f"Details: {extract_api_error(response)}\n"
+                f"References: {invoice_list}"
+            ),
+        )
         return []
 
     return response.json()

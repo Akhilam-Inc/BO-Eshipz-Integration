@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 import json
 import requests
@@ -113,7 +114,10 @@ def create_eshipz_order(doc):
 				frappe.db.set_value("Pickup Forms",doc.get('name'),"is_eshipz_order_created",1)
 				frappe.msgprint(f"Eshipz order created successfully. AWB: {resp_json['data']['files']['label']['label_meta']['awb']}")
 			else:
-				frappe.msgprint(f"Failed to create Eshipz shipment: {resp_json.get('meta', {}).get('message')}")
+				meta = resp_json.get("meta", {})
+				details = meta.get("details") or []
+				error_message = ", ".join(details) if details else meta.get("message")
+				frappe.msgprint(_("Failed to create Eshipz shipment: {0}").format(error_message))
 				frappe.log_error(
 					message=f"Eshipz API Error:\n{frappe.as_json(resp_json, indent=2)}\n\nPayload Sent:\n{frappe.as_json(payload, indent=2)}",
 					title=f"Eshipz Order Creation Failed for Pickup Form {doc.get('name')}"
